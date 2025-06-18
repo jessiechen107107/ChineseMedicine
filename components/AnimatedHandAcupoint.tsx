@@ -52,13 +52,13 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
 
   // 根據真實 SVG 尺寸重新映射穴位座標
   // 原始 SVG viewBox: "0 0 824.000000 624.000000"
-  // 縮放到適合手機螢幕的尺寸
+  // 縮放到適合手機螢幕的尺寸，並調整為翻轉後的位置
   const defaultAcupoints: AcupointData[] = [
     {
       id: 'laogong',
       name: '勞宮',
       x: 160, // 手掌中央位置
-      y: 200,
+      y: 150,
       active: true,
       description: '手厥陰心包經穴位，位於手掌中央，清心火、安神志',
       category: 'primary'
@@ -67,7 +67,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
       id: 'shenmen',
       name: '神門',
       x: 120, // 手腕內側
-      y: 280,
+      y: 70,
       active: true,
       description: '手少陰心經穴位，位於腕橫紋尺側端，安神定志、改善睡眠',
       category: 'primary'
@@ -76,7 +76,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
       id: 'hegu',
       name: '合谷',
       x: 200, // 虎口位置
-      y: 120,
+      y: 230,
       active: true,
       description: '手陽明大腸經穴位，位於虎口處，止痛、提神醒腦',
       category: 'primary'
@@ -85,7 +85,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
       id: 'yintang',
       name: '印堂',
       x: 180, // 手指區域
-      y: 80,
+      y: 270,
       active: false,
       description: '經外奇穴，位於兩眉頭連線中點，安神定志、清頭明目',
       category: 'secondary'
@@ -94,7 +94,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
       id: 'ear_shenmen',
       name: '耳神門',
       x: 220, // 指尖區域
-      y: 60,
+      y: 290,
       active: false,
       description: '耳穴，位於耳廓上方，鎮靜安神、改善睡眠品質',
       category: 'secondary'
@@ -103,7 +103,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
       id: 'kidney_point',
       name: '腎點',
       x: 140, // 手掌下方
-      y: 320,
+      y: 30,
       active: true,
       description: '反射區穴位，對應腎臟功能，補腎益氣、強身健體',
       category: 'tertiary'
@@ -112,7 +112,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
       id: 'liver_point',
       name: '肝點',
       x: 180, // 手掌右側
-      y: 240,
+      y: 110,
       active: false,
       description: '反射區穴位，對應肝臟功能，疏肝理氣、調和氣血',
       category: 'tertiary'
@@ -121,7 +121,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
       id: 'spleen_point',
       name: '脾點',
       x: 140, // 手掌左側
-      y: 260,
+      y: 90,
       active: false,
       description: '反射區穴位，對應脾臟功能，健脾益氣、助消化',
       category: 'tertiary'
@@ -278,19 +278,19 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
         <AnimatedG animatedProps={handAnimatedProps}>
           <Path
             d={handOutlinePath}
-            fill="rgba(255, 255, 255, 0.03)"
+            fill="none"
             stroke="#56696D"
-            strokeWidth="0.5"
-            transform="scale(0.04) translate(-800, -400)"
+            strokeWidth="1"
+            transform="scale(0.04) translate(-800, -400) scale(1, -1) translate(0, -6240)"
           />
           
           {/* 手指詳細輪廓 */}
           <Path
             d={fingerPath}
-            fill="rgba(255, 255, 255, 0.02)"
+            fill="none"
             stroke="#56696D"
-            strokeWidth="0.3"
-            transform="scale(0.04) translate(-800, -400)"
+            strokeWidth="0.8"
+            transform="scale(0.04) translate(-800, -400) scale(1, -1) translate(0, -6240)"
           />
         </AnimatedG>
         
@@ -298,7 +298,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
         <G opacity={0.4}>
           {/* 生命線 */}
           <Path
-            d="M 120 140 Q 130 180 140 220 Q 150 250 160 280"
+            d="M 120 210 Q 130 170 140 130 Q 150 100 160 70"
             fill="none"
             stroke="#56696D"
             strokeWidth="1"
@@ -307,7 +307,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
           
           {/* 智慧線 */}
           <Path
-            d="M 130 120 Q 170 140 210 150 Q 240 160 260 180"
+            d="M 130 230 Q 170 210 210 200 Q 240 190 260 170"
             fill="none"
             stroke="#56696D"
             strokeWidth="1"
@@ -316,7 +316,7 @@ const AnimatedHandAcupoint: React.FC<AnimatedHandAcupointProps> = ({
           
           {/* 感情線 */}
           <Path
-            d="M 120 100 Q 160 90 200 100 Q 230 110 250 130"
+            d="M 120 250 Q 160 260 200 250 Q 230 240 250 220"
             fill="none"
             stroke="#56696D"
             strokeWidth="1"
