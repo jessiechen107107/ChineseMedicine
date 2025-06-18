@@ -695,7 +695,7 @@ export default function HealthOverviewScreen() {
           <SvgText x={10} y={50} fontSize="8" fill="#facc00" fontWeight="bold">HRV</SvgText>
           <SvgText x={10} y={65} fontSize="8" fill="#f2e8b8" fontWeight="bold">Sleep</SvgText>
         </Svg>
-      </View>
+          </View>
     );
   };
 
@@ -785,7 +785,7 @@ export default function HealthOverviewScreen() {
             Kidney
           </SvgText>
         </Svg>
-      </View>
+        </View>
     );
   };
 
@@ -813,8 +813,8 @@ export default function HealthOverviewScreen() {
             {analysis.recommendations.map((rec, index) => (
               <ThemedText key={index} style={styles.recommendationText}>• {rec}</ThemedText>
             ))}
+          </View>
         </View>
-      </View>
     );
   };
 
@@ -1023,7 +1023,7 @@ export default function HealthOverviewScreen() {
                 ) : (
                   (() => {
                     const advice = getPersonalizedAdviceByCategory();
-                    return (
+            return (
                       <View style={styles.adviceCategories}>
                         <View style={styles.adviceCategory}>
                           <ThemedText style={styles.adviceCategoryTitle}>Diet:</ThemedText>
@@ -1049,8 +1049,8 @@ export default function HealthOverviewScreen() {
                           <ThemedText style={styles.adviceCategoryTitle}>Acupressure:</ThemedText>
                           <ThemedText style={styles.adviceCategoryText}>{advice.acupressure}</ThemedText>
                         </View>
-                      </View>
-                    );
+              </View>
+            );
                   })()
                 )}
               </View>
