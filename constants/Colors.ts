@@ -3,24 +3,12 @@
  * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
  */
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
 export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
-  },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
-  },
+    text: '#FFFFFF',           // 白色文字
+    background: '#1E2B2F',     // 整體深綠色背景
+    tint: '#58C8D0',           // 活動指示線條（藍色）
+    tabIconDefault: '#7F9496', // Tab Icon 顏色（未選取狀態）
+    tabIconSelected: '#FFFFFF', // Tab Icon 顏色（已選取狀態）
+    border: '#56696D',         // 邊框顏色：未選取分頁文字色
 };
+
