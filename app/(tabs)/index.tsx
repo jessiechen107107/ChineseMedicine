@@ -1,3 +1,4 @@
+import AnimatedHandAcupoint from '@/components/AnimatedHandAcupoint';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import type { ComprehensiveAnalysis, PersonalizedAdvice } from '@/services/AIAnalysisService';
@@ -34,6 +35,16 @@ interface AcupressurePoint {
   y: number;
   active: boolean;
   description: string;
+}
+
+interface AcupointData {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  active: boolean;
+  description: string;
+  category: 'primary' | 'secondary' | 'tertiary';
 }
 
 interface ConstitutionData {
@@ -256,36 +267,32 @@ export default function HealthOverviewScreen() {
   };
 
   const generateAcupressurePoints = (healthData: HealthData): AcupressurePoint[] => {
-    const basePoints: AcupressurePoint[] = [
-      // 手部穴位座標 (基於您提供的SVG手掌輪廓，經過縮放和位移調整)
-      { name: 'Laogong (PC8)', x: 165, y: 280, active: false, description: 'Heart calming, stress relief' },
-      { name: 'Shenmen (HE7)', x: 130, y: 350, active: false, description: 'Anxiety relief, sleep improvement' },
-      { name: 'Hegu (LI4)', x: 110, y: 220, active: false, description: 'Pain relief, headache' },
-      { name: 'Yintang (EX-HN3)', x: 140, y: 120, active: false, description: 'Mental clarity, stress relief' },
-      { name: 'Ear Shenmen', x: 200, y: 100, active: false, description: 'Addiction recovery, calm mind' },
-      { name: 'Kidney Point', x: 150, y: 370, active: false, description: 'Energy boost, kidney health' },
-      { name: 'Liver Point', x: 190, y: 300, active: false, description: 'Liver qi regulation, detox' },
-      { name: 'Spleen Point', x: 140, y: 330, active: false, description: 'Digestion, energy' },
+    // 基於健康數據生成激活的穴位
+    const points: AcupressurePoint[] = [
+      { name: '勞宮 (PC8)', x: 165, y: 280, active: healthData.heartRate > 80, description: '心包經穴位，調節心率' },
+      { name: '神門 (HE7)', x: 130, y: 350, active: healthData.sleepDuration < 7, description: '心經穴位，改善睡眠' },
+      { name: '合谷 (LI4)', x: 110, y: 220, active: healthData.steps < 5000, description: '大腸經穴位，提升精力' },
+      { name: '印堂 (EX-HN3)', x: 140, y: 120, active: healthData.heartRate > 90, description: '經外奇穴，安神定志' },
+      { name: '耳神門', x: 200, y: 100, active: healthData.sleepDuration < 6, description: '耳穴，改善睡眠品質' },
+      { name: '腎點', x: 150, y: 370, active: healthData.bloodOxygen < 95, description: '反射區，強化腎功能' },
+      { name: '肝點', x: 190, y: 300, active: healthData.heartRate < 60, description: '反射區，調理肝氣' },
+      { name: '脾點', x: 140, y: 330, active: healthData.steps < 3000, description: '反射區，健脾益氣' }
     ];
+    
+    return points;
+  };
 
-    // 根據健康數據激活相應穴位
-    if (healthData.sleepDuration < 6 || healthData.heartRate > 90) {
-      basePoints[0].active = true; // Laogong - 心火旺
-      basePoints[1].active = true; // Shenmen - 失眠
-    }
-    if (healthData.steps < 5000) {
-      basePoints[5].active = true; // Kidney Point - 腎氣虛
-      basePoints[7].active = true; // Spleen Point - 脾虛
-    }
-    if (healthData.heartRate > 85) {
-      basePoints[6].active = true; // Liver Point - 肝氣鬱結
-    }
-    if (healthData.sleepDuration < 6) {
-      basePoints[2].active = true; // Hegu - 頭痛失眠
-      basePoints[3].active = true; // Yintang - 安神
-    }
-
-    return basePoints;
+  // 轉換穴位數據格式以兼容動畫組件
+  const convertToAcupointData = (points: AcupressurePoint[]): AcupointData[] => {
+    return points.map((point, index) => ({
+      id: `acupoint_${index}`,
+      name: point.name.split(' ')[0], // 只取中文名稱
+      x: point.x,
+      y: point.y,
+      active: point.active,
+      description: point.description,
+      category: point.active ? 'primary' : 'secondary' as 'primary' | 'secondary' | 'tertiary'
+    }));
   };
 
   const generateConstitutionData = (healthData: HealthData): ConstitutionData => {
@@ -575,69 +582,26 @@ export default function HealthOverviewScreen() {
   };
 
   const renderAcupressurePointsMap = () => {
-    // 使用您提供的SVG文件中的完整手掌輪廓路徑
-    const handOutlinePath = "M0 3120 l0 -3120 4120 0 4120 0 0 3120 0 3120 -4120 0 -4120 0 0 -3120z m5860 2534 c107 -91 137 -358 145 -1314 2 -256 15 -378 48 -475 14 -40 14 -40 70 -43 53 -3 55 -2 61 25 18 84 36 333 36 513 0 113 5 261 11 330 5 69 13 215 18 325 9 215 24 286 79 388 92 171 262 127 301 -78 6 -29 9 -372 9 -800 0 -454 4 -780 10 -825 6 -41 16 -113 22 -160 13 -104 33 -185 61 -250 26 -60 45 -64 111 -20 57 38 71 55 92 110 21 55 89 171 131 225 20 26 35 61 43 98 16 83 74 197 127 252 100 103 259 140 357 82 23 -14 51 -38 60 -55 17 -29 17 -30 -28 -123 -50 -102 -69 -159 -108 -319 -17 -69 -36 -118 -54 -145 -16 -22 -55 -85 -87 -140 -32 -55 -91 -154 -130 -220 -40 -66 -96 -167 -125 -225 -29 -58 -66 -124 -82 -147 -15 -23 -58 -116 -94 -205 -129 -320 -223 -470 -366 -583 -53 -41 -73 -88 -99 -235 -20 -108 -15 -395 11 -655 11 -121 24 -254 27 -296 l6 -76 -46 -35 c-55 -42 -218 -111 -325 -139 -136 -35 -291 -45 -482 -31 -117 8 -189 18 -230 32 -80 27 -262 113 -277 131 -9 11 -10 37 -2 105 49 455 49 664 -2 1104 -15 131 -25 181 -38 201 -34 47 -88 163 -114 244 -46 148 -115 439 -137 575 -12 74 -32 196 -45 270 -13 74 -29 171 -35 215 -7 44 -23 141 -35 215 -13 74 -28 164 -34 200 -6 36 -26 102 -45 146 -30 72 -61 170 -94 299 -6 22 -25 85 -43 140 -39 123 -46 258 -16 313 20 36 71 72 102 72 34 0 90 -56 127 -127 60 -114 187 -418 209 -500 11 -43 32 -98 46 -123 14 -25 34 -74 45 -110 21 -70 54 -130 69 -130 28 0 -58 638 -143 1060 -35 176 -37 190 -37 351 -1 176 11 238 58 288 23 24 37 31 68 31 63 0 123 -37 160 -99 44 -73 59 -130 84 -306 11 -82 36 -233 54 -335 31 -166 46 -263 59 -370 5 -44 82 -412 96 -462 11 -38 23 -45 48 -29 28 17 35 191 33 761 -2 597 8 880 34 968 11 35 30 68 59 97 38 41 47 45 89 45 35 0 53 -6 77 -26z m-3412 -39 c39 -33 59 -77 82 -182 23 -107 27 -372 16 -1103 -8 -523 -9 -517 44 -522 22 -3 26 3 42 62 26 94 75 399 83 510 3 52 17 147 31 210 14 63 34 160 45 215 76 381 140 565 209 600 71 37 135 2 169 -91 37 -98 30 -238 -33 -609 -13 -82 -32 -203 -41 -267 -8 -64 -24 -152 -35 -194 -11 -42 -20 -92 -20 -110 0 -18 -11 -109 -25 -204 -14 -95 -25 -192 -25 -218 0 -49 20 -82 51 -82 25 0 75 108 142 310 30 91 67 191 81 223 14 32 26 67 26 78 0 33 58 197 91 260 17 31 43 69 59 84 51 49 121 31 155 -42 30 -63 30 -120 0 -234 -15 -57 -31 -131 -35 -164 -13 -97 -38 -199 -69 -282 -16 -43 -32 -100 -36 -128 -9 -67 -67 -314 -105 -445 -38 -132 -64 -268 -84 -440 -31 -264 -39 -316 -58 -409 -36 -172 -111 -351 -237 -564 -28 -46 -55 -104 -61 -128 -17 -74 -24 -430 -11 -579 15 -167 50 -494 57 -536 5 -28 1 -35 -48 -73 -76 -61 -144 -93 -300 -139 -333 -100 -601 -94 -841 17 -77 36 -122 70 -165 124 -39 49 -39 46 1 277 28 155 60 423 77 632 12 146 9 157 -64 237 -136 148 -330 411 -414 561 -48 86 -159 362 -193 479 -43 148 -80 220 -278 536 -44 71 -83 145 -87 164 -8 51 -57 220 -116 399 -31 97 -48 163 -44 178 4 14 25 34 54 51 61 36 150 37 230 3 103 -44 204 -191 235 -341 11 -54 23 -78 64 -128 27 -33 71 -98 98 -143 27 -46 66 -109 88 -142 39 -58 40 -58 79 -53 22 3 45 10 50 15 5 5 20 69 34 143 13 74 35 188 49 254 13 66 27 158 30 205 4 47 11 105 17 130 5 25 13 316 18 655 7 559 9 618 28 702 23 104 45 143 98 168 31 15 42 15 81 4 25 -6 60 -26 78 -43 65 -62 98 -245 84 -471 -5 -71 -5 -139 -2 -150 3 -11 7 -123 8 -250 1 -165 6 -254 18 -315 9 -47 21 -144 26 -215 17 -223 40 -287 106 -299 21 -4 41 -4 45 1 5 4 20 85 35 178 20 128 29 231 36 420 22 658 29 801 49 950 25 194 32 216 76 255 46 40 108 42 152 5z";
+    const acupointData = convertToAcupointData(acupressurePoints);
     
+    const handleAcupointPress = (acupoint: AcupointData) => {
+      Alert.alert(
+        acupoint.name,
+        acupoint.description,
+        [
+          { text: '確定', style: 'default' }
+        ]
+      );
+    };
+
     return (
-      <View style={styles.chartContainer}>
-        <View style={styles.handAcupointContainer}>
-          {/* 使用您提供的SVG手掌輪廓 */}
-          <Svg height={400} width={330} viewBox="0 0 824 624" style={styles.svgOverlay}>
-            {/* 手掌輪廓路徑 */}
-            <Path
-              d={handOutlinePath}
-              fill="rgba(255, 255, 255, 0.05)"
-              stroke="#56696D"
-              strokeWidth="1"
-              transform="scale(0.35) translate(50, 80)"
-            />
-            
-            {/* 穴位點 */}
-            {acupressurePoints.map((point, index) => (
-              <Circle
-                key={index}
-                cx={point.x}
-                cy={point.y}
-                r="8"
-                fill={point.active ? '#58C8D0' : 'rgba(255, 255, 255, 0.6)'}
-                stroke={point.active ? '#FFFFFF' : '#56696D'}
-                strokeWidth="2"
-              />
-            ))}
-            
-            {/* 激活穴位的標籤 */}
-            {acupressurePoints.filter(p => p.active).map((point, index) => (
-              <SvgText
-                key={index}
-                x={point.x + 15}
-                y={point.y + 5}
-                fontSize="10"
-                fill="#58C8D0"
-                fontWeight="bold"
-              >
-                {point.name}
-              </SvgText>
-            ))}
-            
-            {/* 座標顯示 (可選，用於調試) */}
-            {acupressurePoints.filter(p => p.active).map((point, index) => (
-              <SvgText
-                key={`coord-${index}`}
-                x={point.x - 10}
-                y={point.y - 10}
-                fontSize="8"
-                fill="#FFFFFF"
-                opacity={0.7}
-              >
-                ({point.x},{point.y})
-              </SvgText>
-            ))}
-          </Svg>
-        </View>
-      </View>
+      <AnimatedHandAcupoint
+        acupoints={acupointData}
+        onAcupointPress={handleAcupointPress}
+        animationEnabled={true}
+      />
     );
   };
-
 
   const renderWeatherSymptomChart = () => {
     if (weatherSymptomData.length === 0) return null;
@@ -731,7 +695,7 @@ export default function HealthOverviewScreen() {
           <SvgText x={10} y={50} fontSize="8" fill="#facc00" fontWeight="bold">HRV</SvgText>
           <SvgText x={10} y={65} fontSize="8" fill="#f2e8b8" fontWeight="bold">Sleep</SvgText>
         </Svg>
-          </View>
+      </View>
     );
   };
 
@@ -821,7 +785,7 @@ export default function HealthOverviewScreen() {
             Kidney
           </SvgText>
         </Svg>
-        </View>
+      </View>
     );
   };
 
