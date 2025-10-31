@@ -1,10 +1,10 @@
 import { HealthSyncModal } from '@/components/HealthSyncModal';
+import { HeartChart } from '@/components/HeartChart';
+import { SleepQualityModal } from '@/components/SleepQualityModal';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { Colors } from '@/constants/Colors';
 import { HealthData, healthService } from '@/services/HealthService';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Dimensions, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +18,7 @@ interface DayItem {
   day: string;
   fullDate: Date;
   active: boolean;
+  isFuture: boolean;
 }
 
 export default function InfoScreen() {
@@ -26,6 +27,7 @@ export default function InfoScreen() {
   const [healthData, setHealthData] = useState<HealthData | null>(null);
   const [isHealthConnected, setIsHealthConnected] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showQualityModal, setShowQualityModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
@@ -62,9 +64,10 @@ export default function InfoScreen() {
   const loadHealthData = async (date: Date) => {
     try {
       const data = await healthService.getHealthData(date);
-      setHealthData(data);
+      setHealthData(data); // data可能為null，這樣可以指示沒有數據
     } catch (error) {
       console.error('Error loading health data:', error);
+      setHealthData(null);
     }
   };
 
@@ -85,12 +88,14 @@ export default function InfoScreen() {
 
         const isToday = currentDate.toDateString() === today.toDateString();
         const isSelected = currentDate.toDateString() === selectedDate.toDateString();
+        const isFuture = currentDate > today;
 
         newDates.push({
           date: currentDate.getDate().toString(),
           day: isToday ? 'Today' : currentDate.toLocaleDateString('en-US', { weekday: 'short' }),
           fullDate: currentDate,
           active: isSelected,
+          isFuture: isFuture,
         });
       }
       setDates(newDates);
@@ -114,7 +119,12 @@ export default function InfoScreen() {
     generateDates();
   }, [selectedDate]);
 
-  const handleDateSelect = async (date: Date) => {
+  const handleDateSelect = async (date: Date, isFuture: boolean) => {
+    // 禁止選擇未來日期
+    if (isFuture) {
+      return;
+    }
+    
     setSelectedDate(date);
     if (isHealthConnected) {
       await loadHealthData(date);
@@ -156,10 +166,7 @@ export default function InfoScreen() {
   };
 
   return (
-    <LinearGradient
-      colors={['#7A8B68', '#D1E0C4', '#FFFFFF']}
-      style={styles.container}
-    >
+    <View style={styles.container}>
       {/* Fixed Date Selector Header */}
       <View style={[styles.fixedHeader, { paddingTop: Math.max(insets.top + 20, 80) }]}>
           <View style={styles.headerContainer}>
@@ -193,11 +200,28 @@ export default function InfoScreen() {
               {dates.map((dayItem, index) => (
                 <TouchableOpacity
                   key={dayItem.fullDate.toISOString()}
-                  style={[styles.dateBubble, dayItem.active && styles.activeDateBubble]}
-                  onPress={() => handleDateSelect(dayItem.fullDate)}
+                  style={[
+                    styles.dateBubble, 
+                    dayItem.active && styles.activeDateBubble,
+                    dayItem.isFuture && styles.futureDateBubble
+                  ]}
+                  onPress={() => handleDateSelect(dayItem.fullDate, dayItem.isFuture)}
+                  disabled={dayItem.isFuture}
                 >
-                  <ThemedText style={[styles.dateDay, dayItem.active && styles.activeDateDay]}>{dayItem.day}</ThemedText>
-                  <ThemedText style={[styles.dateDate, dayItem.active && styles.activeDateDate]}>{dayItem.date}</ThemedText>
+                  <ThemedText style={[
+                    styles.dateDay, 
+                    dayItem.active && styles.activeDateDay,
+                    dayItem.isFuture && styles.futureDateDay
+                  ]}>
+                    {dayItem.day}
+                  </ThemedText>
+                  <ThemedText style={[
+                    styles.dateDate, 
+                    dayItem.active && styles.activeDateDate,
+                    dayItem.isFuture && styles.futureDateDate
+                  ]}>
+                    {dayItem.date}
+                  </ThemedText>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -220,49 +244,73 @@ export default function InfoScreen() {
               style={styles.healthStatusBanner}
               onPress={() => setShowSyncModal(true)}
             >
-              <Ionicons name="fitness" size={17} color="#FF6B6B" />
+              <Ionicons name="fitness" size={17} color="#1E2B2F" />
               <ThemedText style={styles.healthStatusText}>Tap to enable health data sync</ThemedText>
-              <Ionicons name="chevron-forward" size={17} color="#FF6B6B" />
+              <Ionicons name="chevron-forward" size={17} color="#FFFFFF" />
             </TouchableOpacity>
           )}
 
-          {/* Sleep Card */}
-          <TouchableOpacity style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="bed" size={17} color={'#00C7BE'} />
+          {/* Future Date Banner */}
+          {healthData === null && (() => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const selected = new Date(selectedDate);
+            selected.setHours(0, 0, 0, 0);
+            return selected > today;
+          })() && (
+            <View style={styles.futureDateBanner}>
+              <Ionicons name="time" size={17} color="#56696D" />
+              <ThemedText style={styles.futureDateText}>Health data is not available for future dates</ThemedText>
+            </View>
+          )}
+
+          {/* Sleep Section */}
+          <View style={styles.sectionContainer}>
+            <View style={[styles.cardHeader, styles.indentedHeader]}>
               <ThemedText type="subtitle" style={styles.cardTitle}>Sleep</ThemedText>
-              <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={17} color={'#44403c'} />
             </View>
-            <View style={styles.cardContentRow}>
-              <View style={styles.metricItem}>
-                <ThemedText style={styles.metricLabel}>Duration</ThemedText>
-                <ThemedText style={styles.metricValue}>
-                  {healthData ? formatSleepDuration(healthData.sleepDuration) : '-'}
+            
+            {/* Sleep Cards Row */}
+            <View style={styles.sleepCardsRow}>
+              {/* Sleep Card */}
+              <View style={[styles.sleepCard, { backgroundColor: '#61A494' }]}>
+                <Ionicons name="moon" size={13} color={'#FFFFFF'} />
+                <ThemedText style={styles.sleepCardValue}>
+                  {healthData ? formatSleepDuration(healthData.sleepDuration) : '5h 30m'}
                 </ThemedText>
+                <ThemedText style={styles.sleepCardLabel}>Sleep</ThemedText>
               </View>
-              <View style={styles.metricItem}>
-                <ThemedText style={styles.metricLabel}>Quality</ThemedText>
-                <ThemedText style={styles.metricValue}>
-                  {healthData ? `${healthData.sleepQuality}%` : '-'}
+
+              {/* Deep Sleep Card */}
+              <View style={[styles.sleepCard, { backgroundColor: '#4E8F80' }]}>
+                <ThemedText style={styles.deepSleepIcon}>Z</ThemedText>
+                <ThemedText style={styles.sleepCardValue}>
+                  {healthData ? `${Math.floor(healthData.sleepDuration * 0.2)}h ${Math.round((healthData.sleepDuration * 0.2 % 1) * 60)}m` : '1h 10m'}
                 </ThemedText>
+                <ThemedText style={styles.sleepCardLabel}>Deep</ThemedText>
               </View>
-              <View style={styles.metricItem}>
-                <ThemedText style={styles.metricLabel}>Avg HR</ThemedText>
-                <ThemedText style={styles.metricValue}>
-                  {healthData ? `${healthData.heartRate}` : '-'}
+
+              {/* Quality Sleep Card */}
+              <TouchableOpacity 
+                style={[styles.sleepCard, { backgroundColor: '#68B19D' }]}
+                onPress={() => setShowQualityModal(true)}
+              >
+                <Ionicons name="star" size={13} color={'#FFFFFF'} />
+                <ThemedText style={styles.sleepCardValue}>
+                  {healthData ? `${Math.floor(healthData.sleepDuration * 0.6)}h ${Math.round((healthData.sleepDuration * 0.6 % 1) * 60)}m` : '3h 30m'}
                 </ThemedText>
-              </View>
+                <ThemedText style={styles.sleepCardLabel}>Quality</ThemedText>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
+
+          {/* Heart Chart */}
+          <HeartChart selectedDate={selectedDate} />
 
           {/* Activity Card */}
           <TouchableOpacity style={styles.card}>
             <View style={styles.cardHeader}>
-              <Ionicons name="flame" size={17} color={'#FF3B30'} />
               <ThemedText type="subtitle" style={styles.cardTitle}>Activity</ThemedText>
-              <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={17} color={'#44403c'} />
             </View>
             <View style={styles.cardContentRow}>
               <View style={styles.metricItem}>
@@ -289,65 +337,10 @@ export default function InfoScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* Heart Rate Card */}
-          <TouchableOpacity style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="heart" size={17} color={'#FF2D55'} />
-              <ThemedText type="subtitle" style={styles.cardTitle}>Heart Rate</ThemedText>
-              <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={17} color={'#44403c'} />
-            </View>
-            <View style={styles.cardContentRow}>
-              <View style={styles.metricItem}>
-                <ThemedText style={styles.metricLabel}>Current</ThemedText>
-                <ThemedText style={styles.metricValue}>
-                  {healthData ? `${healthData.heartRate}` : '-'}
-                  <ThemedText style={styles.unit}>bpm</ThemedText>
-                </ThemedText>
-              </View>
-              <View style={styles.metricItem}>
-                <ThemedText style={styles.metricLabel}>HRV</ThemedText>
-                <ThemedText style={styles.metricValue}>
-                  {healthData ? `${healthData.heartRateVariability}` : '-'}
-                  <ThemedText style={styles.unit}>ms</ThemedText>
-                </ThemedText>
-              </View>
-            </View>
-            </TouchableOpacity>
-
-          {/* Blood Oxygen Card */}
-          <TouchableOpacity style={styles.card}>
-              <View style={styles.cardHeader}>
-              <Ionicons name="water" size={17} color={'#d62920'} />
-              <ThemedText type="subtitle" style={styles.cardTitle}>Blood Oxygen</ThemedText>
-                <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={17} color={'#44403c'} />
-              </View>
-            <ThemedText style={styles.smallMetricValue}>
-              {healthData ? `${healthData.bloodOxygen}%` : '-%'}
-            </ThemedText>
-            </TouchableOpacity>
-
-          {/* Electrocardiograms (ECG) Card */}
-          <TouchableOpacity style={styles.card}>
-              <View style={styles.cardHeader}>
-              <Ionicons name="medical" size={17} color={'#f2150a'} />
-              <ThemedText type="subtitle" style={styles.cardTitle}>Electrocardiograms (ECG)</ThemedText>
-                <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={17} color={'#44403c'} />
-              </View>
-            <ThemedText style={styles.smallMetricValue}>
-              {healthData ? healthData.ecgReading : 'No Data'}
-            </ThemedText>
-            </TouchableOpacity>
-
           {/* Cycle Tracking Card */}
           <TouchableOpacity style={styles.card}>
             <View style={styles.cardHeader}>
-              <Ionicons name="ellipse" size={17} color={'#FF375F'} />
               <ThemedText type="subtitle" style={styles.cardTitle}>Cycle Tracking</ThemedText>
-              <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={17} color={'#44403c'} />
             </View>
             <View style={styles.cardContentRow}>
               <View style={styles.metricItem}>
@@ -385,18 +378,27 @@ export default function InfoScreen() {
         onClose={() => setShowSyncModal(false)}
         onSyncComplete={handleSyncComplete}
       />
-    </LinearGradient>
+
+      {/* Sleep Quality Modal */}
+      <SleepQualityModal
+        visible={showQualityModal}
+        onClose={() => setShowQualityModal(false)}
+        healthData={healthData}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#1E2B2F',
   },
   fixedHeader: {
     paddingHorizontal: CONTENT_PADDING,
     paddingBottom: 1,
     zIndex: 1,
+    backgroundColor: '#1E2B2F',
   },
   scrollView: {
     flex: 1,
@@ -421,21 +423,22 @@ const styles = StyleSheet.create({
   currentMonthDay: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#000000',
+    color: '#FFFFFF',
   },
   todayButton: {
     fontSize: 13,
-    color: '#7A8B68',
+    color: '#1E2B2F',
     fontWeight: 'bold',
     paddingVertical: 1,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: '#FFFFFF', // #FFFFFF
+    backgroundColor: '#8ac8cf',
   },
   dateSelectorScroll: {
     flexGrow: 0,
     paddingVertical: 5,
     marginBottom: 15,
+    backgroundColor: 'transparent',
   },
   dateBubble: {
     backgroundColor: 'transparent',
@@ -448,25 +451,25 @@ const styles = StyleSheet.create({
     minHeight: 60,
   },
   activeDateBubble: {
-    backgroundColor: '#657356',
+    backgroundColor: '#8ac8cf',
   },
   dateDay: {
     fontSize: 12,
-    color: '#d5d6d4',
+    color: '#B0B0B0',
   },
   dateDate: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#d5d6d4',
+    color: '#B0B0B0',
   },
   activeDateDay: {
-    color: '#000000',
+    color: '#1E2B2F',
   },
   activeDateDate: {
-    color: '#000000',
+    color: '#1E2B2F',
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#2A3B3FCC',
     borderRadius: 15,
     padding: 15,
     marginBottom: 10,
@@ -485,7 +488,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
-    color: '#44403c',
+    color: '#FFFFFF',
   },
   cardContentRow: {
     flexDirection: 'row',
@@ -498,24 +501,24 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     fontSize: 12,
-    color: '#44403c',
+    color: '#B0B0B0',
     marginBottom: 0,
   },
   metricValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#44403c',
+    color: '#FFFFFF',
   },
   unit: {
     fontSize: 12,
-    color: '#44403c',
+    color: '#B0B0B0',
   },
   circularProgressPlaceholder: {
     width: 50,
     height: 50,
     borderRadius: 25,
     borderWidth: 4,
-    borderColor: '#44403c',
+    borderColor: '#8ac8cf',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -523,18 +526,18 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: Colors.background,
+    backgroundColor: '#2A3B3F',
     justifyContent: 'center',
     alignItems: 'center',
   },
   recordText: {
     fontSize: 14,
-    color: '#44403c',
+    color: '#B0B0B0',
     marginRight: 5,
   },
   feelQuestion: {
     fontSize: 14,
-    color: '#44403c',
+    color: '#FFFFFF',
     marginTop: 8,
   },
   twoColumnContainer: {
@@ -549,7 +552,7 @@ const styles = StyleSheet.create({
   smallMetricValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#44403c',
+    color: '#FFFFFF',
     marginTop: 8,
   },
   circularSmallPlaceholder: {
@@ -557,7 +560,7 @@ const styles = StyleSheet.create({
     height: 35,
     borderRadius: 17.5,
     borderWidth: 2,
-    borderColor: '#44403c',
+    borderColor: '#8ac8cf',
     marginTop: 8,
   },
   headerActions: {
@@ -571,7 +574,7 @@ const styles = StyleSheet.create({
   healthStatusBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFE5E5',
+    backgroundColor: '#8ac8cf',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
@@ -580,12 +583,81 @@ const styles = StyleSheet.create({
   healthStatusText: {
     flex: 1,
     marginLeft: 12,
-    color: '#FF6B6B',
+    color: '#1E2B2F',
     fontSize: 14,
     fontWeight: '500',
   },
   settingsButton: {
     padding: 8,
     marginRight: 8,
+  },
+  futureDateBubble: {
+    opacity: 0.3,
+    backgroundColor: 'transparent',
+  },
+  futureDateDay: {
+    color: '#56696D',
+  },
+  futureDateDate: {
+    color: '#56696D',
+  },
+  futureDateBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2A3B3F',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  futureDateText: {
+    flex: 1,
+    marginLeft: 12,
+    color: '#56696D',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  sleepCardsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  sleepCard: {
+    backgroundColor: '#2A3B3FCC',
+    borderRadius: 18,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 105,
+    height: 170,
+    marginHorizontal: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  sleepCardValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  sleepCardLabel: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  deepSleepIcon: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  sectionContainer: {
+    marginBottom: 10,
+  },
+  indentedHeader: {
+    marginLeft: 15,
   },
 });

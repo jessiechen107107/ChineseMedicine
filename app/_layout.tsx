@@ -1,3 +1,4 @@
+import { healthService } from '@/services/HealthService';
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
@@ -21,6 +22,10 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded) {
       SplashScreen.hideAsync();
+      // 初始化 HealthKit（只初始化一次）
+      healthService.initHealthKitOnce().catch(() => {
+        // 授權被拒或非 iOS 環境時忽略
+      });
     }
   }, [loaded]);
 
@@ -32,6 +37,10 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={DefaultTheme}>
       <Stack>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="welcome" options={{ headerShown: false }} />
+        <Stack.Screen name="signin" options={{ headerShown: false }} />
+        <Stack.Screen name="signup" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
       </Stack>

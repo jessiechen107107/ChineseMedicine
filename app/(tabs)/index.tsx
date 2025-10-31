@@ -1,13 +1,15 @@
-import AnimatedHandAcupoint from '@/components/AnimatedHandAcupoint';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import type { ComprehensiveAnalysis, PersonalizedAdvice } from '@/services/AIAnalysisService';
 import { aiAnalysisService } from '@/services/AIAnalysisService';
-import { HealthData, healthService } from '@/services/HealthService';
+import { getHRVAndHeartRate, HealthData, healthService } from '@/services/HealthService';
+import { TCMWeatherAnalysis, WeatherData, weatherIntegrationService } from '@/services/WeatherIntegrationService';
+import { MaterialIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { Alert, Dimensions, Image, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Image, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
 const CONTENT_PADDING = 15;
@@ -29,24 +31,6 @@ interface TCMAnalysis {
   color: string;
 }
 
-interface AcupressurePoint {
-  name: string;
-  x: number;
-  y: number;
-  active: boolean;
-  description: string;
-}
-
-interface AcupointData {
-  id: string;
-  name: string;
-  x: number;
-  y: number;
-  active: boolean;
-  description: string;
-  category: 'primary' | 'secondary' | 'tertiary';
-}
-
 interface ConstitutionData {
   qi: number;
   blood: number;
@@ -56,16 +40,20 @@ interface ConstitutionData {
   heat: number;
 }
 
-interface WeatherSymptomData {
-  date: string;
-  temperature: number;
-  humidity: number;
-  hrv: number;
-  sleepScore: number;
-  symptomScore: number;
+
+
+interface ExternalPathogensData {
+  wind: number;      // 風邪 0-100
+  cold: number;      // 寒邪 0-100
+  dampness: number;  // 濕邪 0-100
+  dryness: number;   // 燥邪 0-100
+  heat: number;      // 火邪 0-100
+  summerHeat: number; // 暑邪 0-100
 }
 
 export default function HealthOverviewScreen() {
+  const [latestHR, setLatestHR] = useState<number | null>(null);
+  const [latestHRV, setLatestHRV] = useState<number | null>(null);
   const [healthData, setHealthData] = useState<HealthData | null>(null);
   const [weeklyTrends, setWeeklyTrends] = useState<{
     steps: HealthTrend;
@@ -84,15 +72,57 @@ export default function HealthOverviewScreen() {
   const [comprehensiveAnalysis, setComprehensiveAnalysis] = useState<ComprehensiveAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [acupressurePoints, setAcupressurePoints] = useState<AcupressurePoint[]>([]);
   const [constitutionData, setConstitutionData] = useState<ConstitutionData | null>(null);
-  const [weatherSymptomData, setWeatherSymptomData] = useState<WeatherSymptomData[]>([]);
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean>(false);
+  const [currentWeather, setCurrentWeather] = useState<WeatherData | null>(null);
+  const [tcmWeatherAnalysis, setTcmWeatherAnalysis] = useState<TCMWeatherAnalysis | null>(null);
+  
+  // Function to open iOS Weather app
+  const openWeatherApp = async () => {
+    try {
+      const weatherURL = 'weather://';
+      const canOpen = await Linking.canOpenURL(weatherURL);
+      if (canOpen) {
+        await Linking.openURL(weatherURL);
+      } else {
+        // Fallback to App Store if Weather app is not available
+        const appStoreURL = 'https://apps.apple.com/app/weather/id1069513131';
+        await Linking.openURL(appStoreURL);
+      }
+    } catch (error) {
+      console.error('Failed to open Weather app:', error);
+      Alert.alert('Error', 'Unable to open Weather app');
+    }
+  };
   const [organHighlights, setOrganHighlights] = useState<string[]>([]);
   const [personalizedAdvice, setPersonalizedAdvice] = useState<PersonalizedAdvice | null>(null);
+  const [hrvData, setHrvData] = useState<{ date: string; hrv: number }[]>([]);
+  const [organFunctionData, setOrganFunctionData] = useState<{
+    heart: number;
+    liver: number;
+    spleen: number;
+    lung: number;
+    kidney: number;
+  }>({ heart: 70, liver: 70, spleen: 70, lung: 70, kidney: 70 });
+  const [externalPathogensData, setExternalPathogensData] = useState<ExternalPathogensData>({
+    wind: 20,
+    cold: 15,
+    dampness: 30,
+    dryness: 10,
+    heat: 25,
+    summerHeat: 15
+  });
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
     loadHealthOverviewData();
+    // 讀取最近的 HR 與 HRV 作為示範（全域共用函式）
+    getHRVAndHeartRate(24)
+      .then(({ heartRate, hrv }) => {
+        setLatestHR(heartRate);
+        setLatestHRV(hrv);
+      })
+      .catch(() => {});
   }, []);
 
   const loadHealthOverviewData = async () => {
@@ -101,6 +131,43 @@ export default function HealthOverviewScreen() {
       const today = new Date();
       const todayData = await healthService.getHealthData(today);
       setHealthData(todayData);
+
+      // Get weather data for TCM analysis
+      try {
+        console.log('Loading weather data for TCM analysis...');
+        const weatherData = await weatherIntegrationService.getCurrentWeather();
+        
+        if (weatherData) {
+          setCurrentWeather(weatherData);
+          setLocationPermissionGranted(true);
+          // Update overview header location using reverse-geocoded city/country
+          const displayCity = weatherData.location.city && weatherData.location.city !== 'Unknown'
+            ? weatherData.location.city
+            : 'Current Location';
+          const displayCountry = weatherData.location.country && weatherData.location.country !== 'Unknown'
+            ? weatherData.location.country
+            : '';
+          setUserLocation(displayCountry ? `${displayCity}, ${displayCountry}` : displayCity);
+          
+          // Analyze weather factors for TCM
+          const tcmAnalysis = weatherIntegrationService.analyzeTCMWeatherFactors(weatherData);
+          setTcmWeatherAnalysis(tcmAnalysis);
+          
+          console.log('Weather data loaded:', {
+            location: weatherData.location.city,
+            temperature: weatherData.current.temperature,
+            humidity: weatherData.current.humidity,
+            tcmFactors: tcmAnalysis.environmentalFactors
+          });
+          
+        } else {
+          console.log('Failed to get weather data, using fallback');
+          setLocationPermissionGranted(false);
+        }
+      } catch (weatherError) {
+        console.error('Weather integration error:', weatherError);
+        setLocationPermissionGranted(false);
+      }
 
       // Load weekly trends
       const trends = {
@@ -113,39 +180,71 @@ export default function HealthOverviewScreen() {
       };
 
       // Get data for the past 7 days
-      for (let i = 6; i >= 0; i--) {
+      for (let i = 0; i < 7; i++) {
         const date = new Date();
         date.setDate(today.getDate() - i);
         const data = await healthService.getHealthData(date);
         
         const dayLabel = i === 0 ? 'Today' : date.toLocaleDateString('en-US', { weekday: 'short' });
         
-        trends.steps.labels.push(dayLabel);
-        trends.steps.data.push(data.steps);
-        
-        trends.heartRate.labels.push(dayLabel);
-        trends.heartRate.data.push(data.heartRate);
-        
-        trends.sleep.labels.push(dayLabel);
-        trends.sleep.data.push(data.sleepDuration);
-        
-        trends.bloodOxygen.labels.push(dayLabel);
-        trends.bloodOxygen.data.push(data.bloodOxygen);
+        // 只有當數據存在時才添加到趨勢中
+        if (data) {
+          trends.steps.labels.push(dayLabel);
+          trends.steps.data.push(data.steps);
+          
+          trends.heartRate.labels.push(dayLabel);
+          trends.heartRate.data.push(data.heartRate);
+          
+          trends.sleep.labels.push(dayLabel);
+          trends.sleep.data.push(data.sleepDuration);
+          
+          trends.bloodOxygen.labels.push(dayLabel);
+          trends.bloodOxygen.data.push(data.bloodOxygen);
 
-        trends.exerciseMinutes.labels.push(dayLabel);
-        trends.exerciseMinutes.data.push(Math.floor(Math.random() * 60) + 10);
-        
-        trends.walkingHeartRate.labels.push(dayLabel);
-        trends.walkingHeartRate.data.push(data.heartRate - Math.floor(Math.random() * 20) + 10);
+          trends.exerciseMinutes.labels.push(dayLabel);
+          trends.exerciseMinutes.data.push(Math.floor(Math.random() * 60) + 10);
+          
+          trends.walkingHeartRate.labels.push(dayLabel);
+          trends.walkingHeartRate.data.push(data.heartRate - Math.floor(Math.random() * 20) + 10);
+        } else {
+          // 如果沒有數據（未來日期），添加佔位符
+          trends.steps.labels.push(dayLabel);
+          trends.steps.data.push(0);
+          
+          trends.heartRate.labels.push(dayLabel);
+          trends.heartRate.data.push(0);
+          
+          trends.sleep.labels.push(dayLabel);
+          trends.sleep.data.push(0);
+          
+          trends.bloodOxygen.labels.push(dayLabel);
+          trends.bloodOxygen.data.push(0);
+
+          trends.exerciseMinutes.labels.push(dayLabel);
+          trends.exerciseMinutes.data.push(0);
+          
+          trends.walkingHeartRate.labels.push(dayLabel);
+          trends.walkingHeartRate.data.push(0);
+        }
       }
 
       setWeeklyTrends(trends);
       
       // Perform comprehensive AI analysis
       setIsAnalyzing(true);
-      setAiError(null);
       try {
-        const analysis = await aiAnalysisService.analyzeComprehensive(todayData, undefined, userLocation);
+        // 只有當todayData存在時才進行AI分析
+        if (!todayData) {
+          console.log('No health data available for today, skipping AI analysis');
+          setAiError('No health data available for analysis.');
+          return;
+        }
+
+        // Generate external pathogens data first
+        const pathogensData = generateExternalPathogensData();
+        setExternalPathogensData(pathogensData);
+        
+        const analysis = await aiAnalysisService.analyzeComprehensive(todayData, undefined, userLocation, pathogensData);
         setComprehensiveAnalysis(analysis);
         
         // Also set the constitution analysis for backward compatibility
@@ -161,10 +260,11 @@ export default function HealthOverviewScreen() {
         setAiAnalysis(tcmAnalysis);
 
         // Generate visualization data
-        setAcupressurePoints(generateAcupressurePoints(todayData));
         setConstitutionData(generateConstitutionData(todayData));
-        setWeatherSymptomData(generateWeatherSymptomData());
+
         setOrganHighlights(getOrganHighlights(todayData));
+        setHrvData(generateHrvData());
+        setOrganFunctionData(generateOrganFunctionData(todayData));
 
         // Generate personalized advice
         const personalizedAdviceResult = await aiAnalysisService.analyzePersonalizedAdvice(todayData, undefined, userLocation);
@@ -174,12 +274,22 @@ export default function HealthOverviewScreen() {
         setAiError('AI analysis temporarily unavailable. Using basic analysis.');
         
         // 如果AI分析失敗，也嘗試獲取個人化建議
-        try {
-          const personalizedAdviceResult = await aiAnalysisService.analyzePersonalizedAdvice(todayData, undefined, userLocation);
-          setPersonalizedAdvice(personalizedAdviceResult);
-        } catch (adviceError) {
-          console.error('Error performing personalized advice analysis:', adviceError);
-          setAiError('AI analysis temporarily unavailable. Using basic analysis.');
+        if (todayData) {
+          try {
+            const personalizedAdviceResult = await aiAnalysisService.analyzePersonalizedAdvice(todayData, undefined, userLocation);
+            setPersonalizedAdvice(personalizedAdviceResult);
+          } catch (adviceError) {
+            console.error('Error performing personalized advice analysis:', adviceError);
+            setAiError('AI analysis temporarily unavailable. Using basic analysis.');
+            // 設置fallback個人化建議
+            setPersonalizedAdvice({
+              diet: 'Maintain a balanced diet with warm, cooked foods',
+              sleep: 'Maintain a regular sleep schedule, sleeping before 11 PM',
+              emotions: 'Practice stress management through meditation or gentle activities',
+              exercise: 'Engage in moderate exercise like walking or tai chi',
+              acupressure: 'Consider gentle acupressure on Yintang and Baihui points for relaxation'
+            });
+          }
         }
       } finally {
         setIsAnalyzing(false);
@@ -198,12 +308,65 @@ export default function HealthOverviewScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove Photo', onPress: () => setUserAvatar(null) },
-        { text: 'Choose Photo', onPress: () => {
-          // In a real app, this would open image picker
-          Alert.alert('Photo Picker', 'This would open the photo picker in a real app');
-        }},
+        { text: 'Take Photo', onPress: takePhoto },
+        { text: 'Choose from Library', onPress: pickImage },
       ]
     );
+  };
+
+  const requestPermissions = async () => {
+    const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    
+    if (cameraStatus !== 'granted' || libraryStatus !== 'granted') {
+      Alert.alert(
+        'Permissions Required',
+        'Sorry, we need camera and photo library permissions to change your avatar.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const takePhoto = async () => {
+    const hasPermission = await requestPermissions();
+    if (!hasPermission) return;
+
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setUserAvatar(result.assets[0].uri);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to take photo. Please try again.');
+    }
+  };
+
+  const pickImage = async () => {
+    const hasPermission = await requestPermissions();
+    if (!hasPermission) return;
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setUserAvatar(result.assets[0].uri);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
   };
 
   const handleEditProfile = () => {
@@ -266,66 +429,116 @@ export default function HealthOverviewScreen() {
     }
   };
 
-  const generateAcupressurePoints = (healthData: HealthData): AcupressurePoint[] => {
-    // 基於健康數據生成激活的穴位
-    const points: AcupressurePoint[] = [
-      { name: '勞宮 (PC8)', x: 165, y: 280, active: healthData.heartRate > 80, description: '心包經穴位，調節心率' },
-      { name: '神門 (HE7)', x: 130, y: 350, active: healthData.sleepDuration < 7, description: '心經穴位，改善睡眠' },
-      { name: '合谷 (LI4)', x: 110, y: 220, active: healthData.steps < 5000, description: '大腸經穴位，提升精力' },
-      { name: '印堂 (EX-HN3)', x: 140, y: 120, active: healthData.heartRate > 90, description: '經外奇穴，安神定志' },
-      { name: '耳神門', x: 200, y: 100, active: healthData.sleepDuration < 6, description: '耳穴，改善睡眠品質' },
-      { name: '腎點', x: 150, y: 370, active: healthData.bloodOxygen < 95, description: '反射區，強化腎功能' },
-      { name: '肝點', x: 190, y: 300, active: healthData.heartRate < 60, description: '反射區，調理肝氣' },
-      { name: '脾點', x: 140, y: 330, active: healthData.steps < 3000, description: '反射區，健脾益氣' }
-    ];
-    
-    return points;
-  };
-
-  // 轉換穴位數據格式以兼容動畫組件
-  const convertToAcupointData = (points: AcupressurePoint[]): AcupointData[] => {
-    return points.map((point, index) => ({
-      id: `acupoint_${index}`,
-      name: point.name.split(' ')[0], // 只取中文名稱
-      x: point.x,
-      y: point.y,
-      active: point.active,
-      description: point.description,
-      category: point.active ? 'primary' : 'secondary' as 'primary' | 'secondary' | 'tertiary'
-    }));
-  };
-
   const generateConstitutionData = (healthData: HealthData): ConstitutionData => {
-    // Generate constitution radar data based on health metrics
+    // Generate constitution radar data based on health metrics and AI analysis
     let qi = 70, blood = 75, yin = 80, yang = 65, dampness = 30, heat = 40;
 
-    if (healthData.steps < 5000) qi -= 20;
-    if (healthData.sleepDuration < 6) yin -= 15;
-    if (healthData.heartRate > 90) heat += 20;
-    if (healthData.heartRate < 60) yang -= 15;
+    // Analyze heart rate patterns
+    if (healthData.heartRate > 90) {
+      heat += 25; // High heart rate suggests heat pattern
+      yin -= 20;  // Yin deficiency often accompanies heat
+    } else if (healthData.heartRate < 60) {
+      yang -= 25; // Low heart rate suggests yang deficiency
+      qi -= 15;   // Often accompanied by qi deficiency
+    }
+
+    // Analyze sleep patterns
+    if (healthData.sleepDuration < 6) {
+      yin -= 25;  // Poor sleep indicates yin deficiency
+      heat += 15; // Sleep disturbance often shows heat pattern
+    } else if (healthData.sleepDuration > 9) {
+      yang -= 20; // Excessive sleep may indicate yang deficiency
+      dampness += 15; // May suggest dampness retention
+    }
+
+    // Analyze activity levels
+    if (healthData.steps < 3000) {
+      qi -= 30;   // Very low activity suggests significant qi deficiency
+      yang -= 20; // Low energy indicates yang deficiency
+      dampness += 20; // Inactivity can lead to dampness accumulation
+    } else if (healthData.steps < 5000) {
+      qi -= 15;   // Moderate low activity
+      yang -= 10;
+    } else if (healthData.steps > 12000) {
+      yang += 10; // High activity suggests good yang qi
+      qi += 5;
+    }
+
+    // Analyze blood oxygen (circulation indicator)
+    if (healthData.bloodOxygen < 95) {
+      blood -= 20; // Poor oxygen suggests blood stasis
+      qi -= 15;    // Often accompanied by qi deficiency
+    }
+
+    // Ensure values stay within reasonable bounds
+    qi = Math.max(10, Math.min(100, qi));
+    blood = Math.max(10, Math.min(100, blood));
+    yin = Math.max(10, Math.min(100, yin));
+    yang = Math.max(10, Math.min(100, yang));
+    dampness = Math.max(0, Math.min(80, dampness));
+    heat = Math.max(0, Math.min(80, heat));
 
     return { qi, blood, yin, yang, dampness, heat };
   };
 
-  const generateWeatherSymptomData = (): WeatherSymptomData[] => {
-    const data: WeatherSymptomData[] = [];
+
+
+  const generateHrvData = (): { date: string; hrv: number }[] => {
+    const data: { date: string; hrv: number }[] = [];
     const today = new Date();
     
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
       date.setDate(today.getDate() - i);
       
+      // Generate realistic HRV values (20-80 range)
+      const baseHrv = 45; // Average HRV
+      const variation = (Math.random() - 0.5) * 30; // ±15 variation
+      const hrv = Math.max(20, Math.min(80, baseHrv + variation));
+      
       data.push({
-        date: date.toLocaleDateString('en-US', { weekday: 'short' }),
-        temperature: 20 + Math.random() * 15, // 20-35°C
-        humidity: 60 + Math.random() * 30, // 60-90%
-        hrv: 30 + Math.random() * 40, // 30-70
-        sleepScore: 60 + Math.random() * 40, // 60-100
-        symptomScore: Math.random() * 50, // 0-50 (lower is better)
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        hrv: Math.round(hrv)
       });
     }
     
     return data;
+  };
+
+  const generateOrganFunctionData = (healthData: HealthData) => {
+    // Use AI analysis if available, otherwise fallback to simple logic
+    if (comprehensiveAnalysis?.internalBalance?.organFunctionScores) {
+      return comprehensiveAnalysis.internalBalance.organFunctionScores;
+    }
+
+    // Fallback logic (simplified version of the original)
+    let heart = 75, liver = 75, spleen = 75, lung = 75, kidney = 75;
+
+    // Basic adjustments based on key health indicators
+    if (healthData.heartRate > 90 || healthData.sleepDuration < 6) {
+      heart -= 20;
+    }
+    if (healthData.heartRate > 85 || healthData.sleepDuration < 6) {
+      liver -= 15;
+    }
+    if (healthData.steps < 5000) {
+      spleen -= 20;
+    }
+    if (healthData.bloodOxygen < 95 || healthData.steps < 4000) {
+      lung -= 20;
+    }
+    if (healthData.sleepDuration < 6 || healthData.steps < 3000) {
+      kidney -= 20;
+    }
+
+    // Ensure values stay within reasonable range
+    heart = Math.max(30, Math.min(100, heart));
+    liver = Math.max(30, Math.min(100, liver));
+    spleen = Math.max(30, Math.min(100, spleen));
+    lung = Math.max(30, Math.min(100, lung));
+    kidney = Math.max(30, Math.min(100, kidney));
+
+    return { heart, liver, spleen, lung, kidney };
   };
 
   const getOrganHighlights = (healthData: HealthData): string[] => {
@@ -459,7 +672,7 @@ export default function HealthOverviewScreen() {
           'Drink rose tea for liver soothing',
           'Maintain regular sleep schedule'
         ];
-    } else {
+      } else {
         organPattern = 'Harmonious Organ Function';
         organRecommendations = [
           'Continue current healthy practices',
@@ -516,40 +729,38 @@ export default function HealthOverviewScreen() {
     }
 
     // Fallback to basic analysis if AI is not available
-    if (!healthData || !weeklyTrends) return {
-      diet: 'Maintain balanced nutrition',
-      sleep: 'Aim for 7-8 hours quality sleep',
-      emotions: 'Practice mindfulness daily',
-      exercise: 'Regular moderate exercise',
-      acupressure: 'Use preventive acupressure'
-    };
+    if (!healthData || !weeklyTrends) {
+      return {
+        diet: 'Load health data for personalized advice.',
+        sleep: 'Load health data for personalized advice.',
+        emotions: 'Load health data for personalized advice.',
+        exercise: 'Load health data for personalized advice.',
+        acupressure: 'Load health data for personalized advice.'
+      };
+    }
 
     const avgSleep = weeklyTrends.sleep.data.reduce((a, b) => a + b, 0) / weeklyTrends.sleep.data.length;
     const avgSteps = weeklyTrends.steps.data.reduce((a, b) => a + b, 0) / weeklyTrends.steps.data.length;
     const avgHR = weeklyTrends.heartRate.data.reduce((a, b) => a + b, 0) / weeklyTrends.heartRate.data.length;
 
-    let diet = '';
-    let sleep = '';
-    let emotions = '';
-    let exercise = '';
-    let acupressure = '';
+    let diet = '', sleep = '', emotions = '', exercise = '', acupressure = '';
 
     // Diet recommendations based on constitution
-    if (avgHR > 85 && avgSleep < 6) {
-      diet = 'Focus on cooling foods like goji berries and black sesame. Avoid spicy foods.';
+    if (avgSleep < 6 && avgHR > 85) {
+      diet = 'Focus on Yin-nourishing foods: lily bulbs, white fungus, and herbal soups.';
     } else if (avgSteps < 5000) {
-      diet = 'Include warming foods like ginger and dates. Avoid cold drinks.';
+      diet = 'Include Qi-boosting foods: ginseng tea, dates, and warm grains.';
     } else {
-      diet = 'Maintain balanced nutrition with seasonal vegetables and lean proteins.';
+      diet = 'Maintain balanced nutrition with seasonal adjustments.';
     }
 
     // Sleep recommendations
     if (avgSleep < 6) {
-      sleep = 'Sleep before 11 PM. Try herbal teas like chrysanthemum.';
+      sleep = 'Establish calming bedtime routine. Try chrysanthemum tea before bed.';
     } else if (avgSleep > 9) {
-      sleep = 'Improve sleep quality. Consider morning light exposure.';
+      sleep = 'Consider gentle morning exercise to optimize sleep quality.';
     } else {
-      sleep = 'Continue current sleep schedule. Maintain consistency.';
+      sleep = 'Continue good sleep habits with consistent schedule.';
     }
 
     // Emotional recommendations
@@ -570,118 +781,227 @@ export default function HealthOverviewScreen() {
       exercise = 'Continue current routine with seasonal adjustments.';
     }
 
-    // Acupressure recommendations
-    const activePoints = acupressurePoints.filter(p => p.active);
-    if (activePoints.length > 0) {
-      acupressure = `Focus on ${activePoints.map(p => p.name.split(' ')[0]).join(', ')} points.`;
+    // Acupressure recommendations (simplified without hand chart data)
+    if (avgSleep < 6) {
+      acupressure = 'Focus on Shenmen (HE7) and Yintang (EX-HN3) points for better sleep.';
+    } else if (avgSteps < 5000) {
+      acupressure = 'Regular acupressure at Zusanli (ST36) point to boost energy.';
     } else {
-      acupressure = 'Regular acupressure at Zusanli and Shenmen points.';
+      acupressure = 'Regular acupressure at Zusanli and Shenmen points for maintenance.';
     }
 
     return { diet, sleep, emotions, exercise, acupressure };
   };
 
-  const renderAcupressurePointsMap = () => {
-    const acupointData = convertToAcupointData(acupressurePoints);
+  const renderAdviceChart = () => {
+    if (!hrvData || !weeklyTrends?.sleep) {
+      return null;
+    }
+
+    const chartWidth = 320;
+    const chartHeight = 200;
+    const padding = { top: 20, right: 25, bottom: 35, left: 45 };
+    const drawableWidth = chartWidth - padding.left - padding.right;
     
-    const handleAcupointPress = (acupoint: AcupointData) => {
-      Alert.alert(
-        acupoint.name,
-        acupoint.description,
-        [
-          { text: '確定', style: 'default' }
-        ]
-      );
+    const hrvValues = hrvData.map(d => d.hrv);
+    const sleepValues = weeklyTrends.sleep.data;
+    const labels = weeklyTrends.sleep.labels;
+
+    const maxHrv = 100; // Assume max HRV is 100 for normalization
+    const maxSleep = 12; // Assume max sleep is 12 hours for normalization
+
+    const yTicks = [0, 20, 40, 60, 80, 100];
+    const yTickLabels = ['0', '20', '40', '60', '80', '100'];
+
+    const getYPosition = (value: number) => {
+      return padding.top + (1 - value / 100) * (chartHeight - padding.top - padding.bottom);
     };
 
-    return (
-      <AnimatedHandAcupoint
-        acupoints={acupointData}
-        onAcupointPress={handleAcupointPress}
-        animationEnabled={true}
-      />
-    );
-  };
-
-  const renderWeatherSymptomChart = () => {
-    if (weatherSymptomData.length === 0) return null;
-
-    const chartWidth = 330;
-    const chartHeight = 180;
-    const padding = 65;
-    const leftPadding = 80; // 增加左邊距以對齊Y軸標籤
-    const topPadding = 20; // 減少上邊距
-    const dataWidth = chartWidth - leftPadding - 20;
-    const dataHeight = chartHeight - topPadding - 30;
-
-    const maxTemp = Math.max(...weatherSymptomData.map(d => d.temperature));
-    const minTemp = Math.min(...weatherSymptomData.map(d => d.temperature));
-    const maxHumidity = Math.max(...weatherSymptomData.map(d => d.humidity));
-    const maxHRV = Math.max(...weatherSymptomData.map(d => d.hrv));
-    const maxSleep = Math.max(...weatherSymptomData.map(d => d.sleepScore));
-
-    const tempPoints = weatherSymptomData.map((data, index) => ({
-      x: leftPadding + (index / (weatherSymptomData.length - 1)) * dataWidth,
-      y: topPadding + ((maxTemp - data.temperature) / (maxTemp - minTemp)) * dataHeight
-    }));
-
-    const humidityPoints = weatherSymptomData.map((data, index) => ({
-      x: leftPadding + (index / (weatherSymptomData.length - 1)) * dataWidth,
-      y: topPadding + ((maxHumidity - data.humidity) / maxHumidity) * dataHeight
-    }));
-
-    const hrvPoints = weatherSymptomData.map((data, index) => ({
-      x: leftPadding + (index / (weatherSymptomData.length - 1)) * dataWidth,
-      y: topPadding + ((maxHRV - data.hrv) / maxHRV) * dataHeight
-    }));
-
-    const sleepPoints = weatherSymptomData.map((data, index) => ({
-      x: leftPadding + (index / (weatherSymptomData.length - 1)) * dataWidth,
-      y: topPadding + ((maxSleep - data.sleepScore) / maxSleep) * dataHeight
-    }));
+    const barWidth = drawableWidth / labels.length * 0.4;
 
     return (
       <View style={styles.chartContainer}>
-        <Svg height={chartHeight + 10} width={chartWidth} style={styles.svgChart}>
-          {/* Temperature line */}
+        <Svg height={chartHeight} width={chartWidth}>
+          {/* Y-Axis labels and grid lines */}
+          {yTicks.map((tick, index) => (
+            <G key={`y-tick-${index}`}>
+              <Line
+                x1={padding.left}
+                y1={getYPosition(tick)}
+                x2={chartWidth - padding.right}
+                y2={getYPosition(tick)}
+                stroke="#56696D"
+                strokeDasharray="2, 2"
+              />
+              <SvgText
+                x={padding.left - 8}
+                y={getYPosition(tick) + 4}
+                fontSize="10"
+                fill="#B0B0B0"
+                textAnchor="end"
+              >
+                {yTickLabels[index]}
+              </SvgText>
+            </G>
+          ))}
+
+          {/* X-Axis labels and bars */}
+          {labels.map((label, index) => {
+            const centerX = padding.left + (index + 0.5) * (drawableWidth / labels.length);
+            const sleepValue = (sleepValues[index] / maxSleep) * 100;
+            const hrvValue = (hrvValues[index] / maxHrv) * 100;
+            
+            const sleepBarHeight = (sleepValue / 100) * (chartHeight - padding.top - padding.bottom);
+            const hrvBarHeight = (hrvValue / 100) * (chartHeight - padding.top - padding.bottom);
+
+            // Calculate bar positions to ensure they're centered and properly spaced
+            const barSpacing = 2; // Space between the two bars
+            const sleepBarX = centerX - barWidth - (barSpacing / 2);
+            const hrvBarX = centerX + (barSpacing / 2);
+
+            return (
+              <G key={`x-tick-${index}`}>
+                <SvgText
+                  x={centerX}
+                  y={chartHeight - padding.bottom + 15}
+                  fontSize="10"
+                  fill="#B0B0B0"
+                  textAnchor="middle"
+                >
+                  {label}
+                </SvgText>
+
+                {/* Sleep Bar (darker) */}
+                <Rect
+                  x={sleepBarX}
+                  y={chartHeight - padding.bottom - sleepBarHeight}
+                  width={barWidth}
+                  height={sleepBarHeight}
+                  fill="#46787d"
+                  fillOpacity={0.85}
+                  rx="3"
+                  ry="3"
+                />
+
+                {/* HRV Bar (lighter) */}
+                <Rect
+                  x={hrvBarX}
+                  y={chartHeight - padding.bottom - hrvBarHeight}
+                  width={barWidth}
+                  height={hrvBarHeight}
+                  fill="#8ac8cf"
+                  fillOpacity={0.85}
+                  rx="3"
+                  ry="3"
+                />
+              </G>
+            );
+          })}
+         </Svg>
+         
+         {/* Legend */}
+         <View style={styles.chartLegend}>
+           <View style={styles.legendItem}>
+             <View style={[styles.legendColor, { backgroundColor: '#46787d', opacity: 0.9 }]} />
+             <ThemedText style={styles.legendText}>Sleep</ThemedText>
+           </View>
+           <View style={styles.legendItem}>
+             <View style={[styles.legendColor, { backgroundColor: '#8ac8cf', opacity: 0.9 }]} />
+             <ThemedText style={styles.legendText}>HRV</ThemedText>
+           </View>
+         </View>
+       </View>
+     );
+   };
+
+  const renderHrvChart = () => {
+    if (hrvData.length === 0) return null;
+
+    const chartWidth = 330;
+    const chartHeight = 200;
+    const leftPadding = 35;
+    const rightPadding = 35;
+    const topPadding = 20;
+    const bottomPadding = 40;
+    const dataWidth = chartWidth - leftPadding - rightPadding;
+    const dataHeight = chartHeight - topPadding - bottomPadding;
+
+    const maxHrv = Math.max(...hrvData.map(d => d.hrv));
+    const minHrv = Math.min(...hrvData.map(d => d.hrv));
+    const hrvRange = maxHrv - minHrv;
+
+    // HRV background zones
+    const normalZone = 50; // Above 50 is normal, below 50 is low
+
+    const getYPosition = (hrv: number) => {
+      return topPadding + ((maxHrv - hrv) / hrvRange) * dataHeight;
+    };
+
+    const hrvPoints = hrvData.map((data, index) => ({
+      x: leftPadding + (index / (hrvData.length - 1)) * dataWidth,
+      y: getYPosition(data.hrv)
+    }));
+
+    const pathData = hrvPoints.map((point, index) => 
+      `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`
+    ).join(' ');
+
+    return (
+      <View style={[styles.chartContainer, { marginVertical: 15 }]}>
+        <View style={{ alignItems: 'center' }}>
+          <Svg height={chartHeight + 20} width={chartWidth} style={styles.svgChart}>
+          {/* Background zones */}
+          {/* Low zone (below 50) */}
           <Path
-            d={`M ${tempPoints.map(p => `${p.x},${p.y}`).join(' L ')}`}
-            stroke="#2e6c70"
-            strokeWidth="2"
-            fill="none"
+            d={`M ${leftPadding} ${getYPosition(50)} L ${leftPadding + dataWidth} ${getYPosition(50)} L ${leftPadding + dataWidth} ${topPadding + dataHeight} L ${leftPadding} ${topPadding + dataHeight} Z`}
+            fill="#d5ebed"
+            fillOpacity={0.2}
+          />
+          {/* Normal zone (above 50) */}
+          <Path
+            d={`M ${leftPadding} ${topPadding} L ${leftPadding + dataWidth} ${topPadding} L ${leftPadding + dataWidth} ${getYPosition(50)} L ${leftPadding} ${getYPosition(50)} Z`}
+            fill="#8ac8cf"
+            fillOpacity={0.2}
           />
           
-          {/* Humidity line */}
-          <Path
-            d={`M ${humidityPoints.map(p => `${p.x},${p.y}`).join(' L ')}`}
-            stroke="#58C8D0"
-            strokeWidth="2"
-            fill="none"
+          {/* Grid lines */}
+          <Line
+            x1={leftPadding}
+            y1={getYPosition(normalZone)}
+            x2={leftPadding + dataWidth}
+            y2={getYPosition(normalZone)}
+            stroke="#56696D"
+            strokeWidth="1"
+            strokeDasharray="5,5"
+            opacity={0.3}
           />
-
+          
           {/* HRV line */}
           <Path
-            d={`M ${hrvPoints.map(p => `${p.x},${p.y}`).join(' L ')}`}
-            stroke="#facc00"
-            strokeWidth="2"
+            d={pathData}
+            stroke="#8ac8cf"
+            strokeWidth="3"
             fill="none"
           />
           
-          {/* Sleep Quality line */}
-          <Path
-            d={`M ${sleepPoints.map(p => `${p.x},${p.y}`).join(' L ')}`}
-            stroke="#f2e8b8"
-            strokeWidth="2"
-            fill="none"
-          />
+          {/* Data points */}
+          {hrvPoints.map((point, index) => (
+            <Circle
+              key={index}
+              cx={point.x}
+              cy={point.y}
+              r="4"
+              fill="#8ac8cf"
+            />
+          ))}
           
           {/* X-axis labels */}
-          {weatherSymptomData.map((data, index) => (
+          {hrvData.map((data, index) => (
             <SvgText
               key={index}
-              x={leftPadding + (index / (weatherSymptomData.length - 1)) * dataWidth}
-              y={chartHeight }
-              fontSize="8"
+              x={leftPadding + (index / (hrvData.length - 1)) * dataWidth}
+              y={chartHeight + 15}
+              fontSize="10"
               fill="#B0B0B0"
               textAnchor="middle"
             >
@@ -690,11 +1010,80 @@ export default function HealthOverviewScreen() {
           ))}
           
           {/* Y-axis labels */}
-          <SvgText x={10} y={20} fontSize="8" fill="#2e6c70" fontWeight="bold">Temperature</SvgText>
-          <SvgText x={10} y={35} fontSize="8" fill="#58C8D0" fontWeight="bold">Humidity</SvgText>
-          <SvgText x={10} y={50} fontSize="8" fill="#facc00" fontWeight="bold">HRV</SvgText>
-          <SvgText x={10} y={65} fontSize="8" fill="#f2e8b8" fontWeight="bold">Sleep</SvgText>
+          {[minHrv, normalZone, maxHrv].map((value, index) => (
+            <SvgText
+              key={index}
+              x={leftPadding - 10}
+              y={getYPosition(value) + 3}
+              fontSize="10"
+              fill="#B0B0B0"
+              textAnchor="end"
+            >
+              {Math.round(value)}
+            </SvgText>
+          ))}
+          
+          {/* Zone labels */}
+          <SvgText x={leftPadding + dataWidth - 45} y={topPadding + 15} fontSize="9" fill="#8ac8cf" fontWeight="bold">
+            Normal
+          </SvgText>
+          <SvgText x={leftPadding + dataWidth - 45} y={getYPosition(35)} fontSize="9" fill="#d5ebed" fontWeight="bold">
+            Low
+          </SvgText>
         </Svg>
+        </View>
+      </View>
+    );
+  };
+
+
+
+  const renderOrganFunctionChart = () => {
+    const organs = [
+      { name: 'Heart', key: 'heart', value: organFunctionData.heart },
+      { name: 'Liver', key: 'liver', value: organFunctionData.liver },
+      { name: 'Spleen', key: 'spleen', value: organFunctionData.spleen },
+      { name: 'Lung', key: 'lung', value: organFunctionData.lung },
+      { name: 'Kidney', key: 'kidney', value: organFunctionData.kidney },
+    ];
+
+    const getProgressColor = (value: number) => {
+      if (value >= 70) return '#8ac8cf'; // Normal Function
+      return '#46787d'; // Abnormal Function
+    };
+
+    const getStatusText = (value: number) => {
+      return ''; // 移除所有狀態文字
+    };
+
+    return (
+      <View style={styles.chartContainer}>
+        <View style={styles.organFunctionContainer}>
+          {organs.map((organ, index) => (
+            <View key={index} style={styles.organProgressItem}>
+              <View style={styles.organProgressHeader}>
+                <Text style={styles.organName}>{organ.name}</Text>
+                <Text style={[styles.organStatus, { color: getProgressColor(organ.value) }]}>
+                  {getStatusText(organ.value)}
+                </Text>
+              </View>
+              <View style={styles.progressBarContainer}>
+                <View style={styles.progressBarBackground}>
+                  <View 
+                    style={[
+                      styles.progressBarFill, 
+                      { 
+                        width: `${organ.value}%`, 
+                        backgroundColor: getProgressColor(organ.value) 
+                      }
+                    ]} 
+                  />
+                </View>
+                <Text style={styles.progressValue}>{organ.value}%</Text>
+              </View>
+            </View>
+          ))}
+        </View>
           </View>
     );
   };
@@ -821,8 +1210,8 @@ export default function HealthOverviewScreen() {
   const renderConstitutionRadarChart = () => {
     if (!constitutionData) return null;
 
-    const centerX = 120;
-    const centerY = 120;
+    const centerX = 130;
+    const centerY = 130;
     const radius = 80;
     const categories = ['Qi', 'Blood', 'Yin', 'Yang', 'Dampness', 'Heat'];
     const values = [
@@ -852,7 +1241,7 @@ export default function HealthOverviewScreen() {
 
     return (
       <View style={styles.chartContainer}>
-        <Svg height={240} width={240} style={styles.svgChart}>
+        <Svg height={260} width={260} style={styles.svgChart}>
           {/* Grid circles */}
           {[0.2, 0.4, 0.6, 0.8, 1.0].map((scale, index) => (
             <Circle
@@ -887,9 +1276,9 @@ export default function HealthOverviewScreen() {
           {/* Data polygon */}
           <Path
             d={pathData}
-            fill="#58C8D0"
+            fill="#8ac8cf"
             fillOpacity={0.3}
-            stroke="#58C8D0"
+            stroke="#8ac8cf"
             strokeWidth="2"
           />
           
@@ -900,16 +1289,221 @@ export default function HealthOverviewScreen() {
               cx={point.x}
               cy={point.y}
               r="4"
-              fill="#58C8D0"
+              fill="#8ac8cf"
             />
           ))}
           
-          {/* Labels */}
+          {/* Labels with percentages */}
           {points.map((point, index) => (
+            <G key={index}>
             <SvgText
+                x={point.labelX}
+                y={point.labelY - 8}
+                fontSize="12"
+                fill="#FFFFFF"
+                textAnchor="middle"
+                fontWeight="bold"
+              >
+                {point.label}
+              </SvgText>
+              <SvgText
+                x={point.labelX}
+                y={point.labelY + 6}
+                fontSize="10"
+                fill="#8ac8cf"
+                textAnchor="middle"
+                fontWeight="normal"
+              >
+                {values[index]}%
+              </SvgText>
+            </G>
+          ))}
+        </Svg>
+      </View>
+    );
+  };
+
+  const generateExternalPathogensData = (): ExternalPathogensData => {
+    // 基於健康數據、天氣數據和assessment記錄分析外邪程度
+    let wind = 20; // 基礎值
+    let cold = 15;
+    let dampness = 30;
+    let dryness = 10;
+    let heat = 25;
+    let summerHeat = 15;
+
+    // 基於健康數據分析
+    if (healthData) {
+      // 心率異常可能是風邪或火邪
+      if (healthData.heartRate > 90) {
+        wind += 20;
+        heat += 25;
+      } else if (healthData.heartRate < 60) {
+        cold += 25;
+      }
+
+      // 睡眠品質差可能是心火或風邪
+      if (healthData.sleepDuration < 6) {
+        heat += 20;
+        wind += 15;
+      } else if (healthData.sleepDuration > 9) {
+        dampness += 20; // 嗜睡可能是濕邪
+      }
+
+      // 活動量低可能是濕邪或寒邪
+      if (healthData.steps < 3000) {
+        dampness += 25;
+        cold += 15;
+      }
+
+      // 血氧低可能是痰濕阻肺
+      if (healthData.bloodOxygen < 95) {
+        dampness += 30;
+      }
+    }
+
+    // 基於真實天氣數據的環境分析
+    if (currentWeather && tcmWeatherAnalysis) {
+      // 使用真實天氣數據的 TCM 分析結果
+      const weatherFactors = tcmWeatherAnalysis.environmentalFactors;
+      
+      wind += weatherFactors.wind * 0.6;
+      cold += weatherFactors.cold * 0.6;
+      heat += weatherFactors.heat * 0.6;
+      dampness += weatherFactors.dampness * 0.6;
+      dryness += weatherFactors.dryness * 0.6;
+      summerHeat += weatherFactors.summerHeat * 0.6;
+      
+      console.log('Applied weather factors to pathogen analysis:', {
+        temperature: currentWeather.current.temperature,
+        humidity: currentWeather.current.humidity,
+        appliedFactors: {
+          wind: weatherFactors.wind * 0.6,
+          cold: weatherFactors.cold * 0.6,
+          heat: weatherFactors.heat * 0.6,
+          dampness: weatherFactors.dampness * 0.6
+        }
+      });
+    } else if (locationPermissionGranted) {
+      // 備用的季節性分析
+      const currentMonth = new Date().getMonth() + 1;
+      
+      if (currentMonth >= 12 || currentMonth <= 2) {
+        cold += 25; wind += 20; dryness += 15;
+      } else if (currentMonth >= 6 && currentMonth <= 8) {
+        heat += 25; summerHeat += 30; dampness += 15;
+      } else if (currentMonth >= 3 && currentMonth <= 5) {
+        wind += 25; dampness += 10;
+      } else {
+        dryness += 30; wind += 15;
+      }
+    }
+
+
+    // 限制在0-100範圍內
+    return {
+      wind: Math.min(100, Math.max(0, wind)),
+      cold: Math.min(100, Math.max(0, cold)),
+      dampness: Math.min(100, Math.max(0, dampness)),
+      dryness: Math.min(100, Math.max(0, dryness)),
+      heat: Math.min(100, Math.max(0, heat)),
+      summerHeat: Math.min(100, Math.max(0, summerHeat))
+    };
+  };
+
+  const renderExternalPathogensChart = () => {
+    if (!externalPathogensData) return null;
+
+    const centerX = 130;
+    const centerY = 130;
+    const radius = 80;
+    const categories = ['Wind', 'Cold', 'Dampness', 'Dryness', 'Heat', 'Summer Heat'];
+    const values = [
+      externalPathogensData.wind,
+      externalPathogensData.cold,
+      externalPathogensData.dampness,
+      externalPathogensData.dryness,
+      externalPathogensData.heat,
+      externalPathogensData.summerHeat
+    ];
+
+    const points = categories.map((_, index) => {
+      const angle = (index * 2 * Math.PI) / categories.length - Math.PI / 2;
+      const value = values[index] / 100;
+      return {
+        x: centerX + Math.cos(angle) * radius * value,
+        y: centerY + Math.sin(angle) * radius * value,
+        labelX: centerX + Math.cos(angle) * (radius + 20),
+        labelY: centerY + Math.sin(angle) * (radius + 20),
+        label: categories[index]
+      };
+    });
+
+    const pathData = points.map((point, index) => 
+      `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`
+    ).join(' ') + ' Z';
+
+    return (
+      <View style={styles.chartContainer}>
+        <View style={styles.svgChartWrapper}>
+          <Svg height={260} width={260} style={styles.svgChart}>
+            {/* Grid circles */}
+            {[0.2, 0.4, 0.6, 0.8, 1.0].map((scale, index) => (
+              <Circle
               key={index}
+                cx={centerX}
+                cy={centerY}
+                r={radius * scale}
+                stroke="#56696D"
+                strokeWidth="1"
+                fill="none"
+                opacity={0.3}
+              />
+            ))}
+            
+            {/* Grid lines */}
+            {categories.map((_, index) => {
+              const angle = (index * 2 * Math.PI) / categories.length - Math.PI / 2;
+              return (
+                <Line
+                  key={index}
+                  x1={centerX}
+                  y1={centerY}
+                  x2={centerX + Math.cos(angle) * radius}
+                  y2={centerY + Math.sin(angle) * radius}
+                  stroke="#56696D"
+                  strokeWidth="1"
+                  opacity={0.3}
+                />
+              );
+            })}
+            
+            {/* Data polygon */}
+            <Path
+              d={pathData}
+              fill="#8ac8cf"
+              fillOpacity={0.3}
+              stroke="#8ac8cf"
+              strokeWidth="2"
+            />
+            
+            {/* Data points */}
+            {points.map((point, index) => (
+              <Circle
+                key={index}
+                cx={point.x}
+                cy={point.y}
+                r="4"
+                fill="#8ac8cf"
+              />
+            ))}
+            
+            {/* Labels with percentages */}
+            {points.map((point, index) => (
+              <G key={index}>
+                <SvgText
               x={point.labelX}
-              y={point.labelY}
+                  y={point.labelY - 8}
               fontSize="12"
               fill="#FFFFFF"
               textAnchor="middle"
@@ -917,8 +1511,28 @@ export default function HealthOverviewScreen() {
             >
               {point.label}
             </SvgText>
-          ))}
+                <SvgText
+                  x={point.labelX}
+                  y={point.labelY + 6}
+                  fontSize="10"
+                  fill="#8ac8cf"
+                  textAnchor="middle"
+                  fontWeight="normal"
+                >
+                  {values[index]}%
+                </SvgText>
+              </G>
+            ))}
+
+            {/* Center point */}
+            <Circle
+              cx={centerX}
+              cy={centerY}
+              r="3"
+              fill="#56696D"
+            />
         </Svg>
+        </View>
       </View>
     );
   };
@@ -965,11 +1579,22 @@ export default function HealthOverviewScreen() {
               <View style={styles.avatar}>
                 {userAvatar ? (
                   <Image source={{ uri: userAvatar }} style={styles.avatarImage} />
-                ) : null}
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <MaterialIcons name="camera-alt" size={40} color="#8ac8cf" />
+                  </View>
+                )}
               </View>
             </TouchableOpacity>
             <ThemedText style={styles.userName}>{userName}</ThemedText>
             <ThemedText style={styles.userLocation}>{userLocation}</ThemedText>
+          </View>
+
+          {/* Quick HR/HRV from HealthKit */}
+          <View style={{ marginBottom: 10 }}>
+            <ThemedText style={{ color: '#FFFFFF' }}>
+              HR: {latestHR ?? '-'} bpm  |  HRV: {latestHRV ?? '-'} ms
+            </ThemedText>
           </View>
 
           {/* Tab Navigation */}
@@ -978,34 +1603,59 @@ export default function HealthOverviewScreen() {
               style={[styles.tab, activeTab === 'advice' && styles.activeTab]}
               onPress={() => setActiveTab('advice')}
             >
-              <ThemedText style={[styles.tabText, activeTab === 'advice' && styles.activeTabText]}>ADVICE</ThemedText>
+              <ThemedText 
+                style={[styles.tabText, activeTab === 'advice' && styles.activeTabText]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.7}
+              >
+                ADVICE
+              </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.tab, activeTab === 'constitution' && styles.activeTab]}
               onPress={() => setActiveTab('constitution')}
             >
-              <ThemedText style={[styles.tabText, activeTab === 'constitution' && styles.activeTabText]}>CONSTITUTION</ThemedText>
+              <ThemedText 
+                style={[styles.tabText, activeTab === 'constitution' && styles.activeTabText]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.7}
+              >
+                CONSTITUTION
+              </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.tab, activeTab === 'external' && styles.activeTab]}
               onPress={() => setActiveTab('external')}
             >
-              <ThemedText style={[styles.tabText, activeTab === 'external' && styles.activeTabText]}>EXTERNAL</ThemedText>
+              <ThemedText 
+                style={[styles.tabText, activeTab === 'external' && styles.activeTabText]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.7}
+              >
+                EXTERNAL
+              </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity 
-              style={[styles.tab, activeTab === 'organ' && styles.activeTab]}
-              onPress={() => setActiveTab('organ')}
+              style={[styles.tab, activeTab === 'internal' && styles.activeTab]}
+              onPress={() => setActiveTab('internal')}
             >
-              <ThemedText style={[styles.tabText, activeTab === 'organ' && styles.activeTabText]}>ORGAN</ThemedText>
+              <ThemedText 
+                style={[styles.tabText, activeTab === 'internal' && styles.activeTabText]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.7}
+              >
+                INTERNAL
+              </ThemedText>
             </TouchableOpacity>
           </View>
 
           {/* Content based on active tab */}
           {activeTab === 'advice' && (
             <View style={styles.wellnessAdviceCard}>
-              <ThemedText style={styles.wellnessAdviceTitle}>Advice</ThemedText>
-              {renderAcupressurePointsMap()}
-              
               <View style={styles.personalizedAdviceContainer}>
                 <ThemedText style={styles.personalizedAdviceTitle}>Personalized wellness advice</ThemedText>
                 
@@ -1025,6 +1675,9 @@ export default function HealthOverviewScreen() {
                     const advice = getPersonalizedAdviceByCategory();
             return (
                       <View style={styles.adviceCategories}>
+                        {/* HRV Chart */}
+                        {renderAdviceChart()}
+                        
                         <View style={styles.adviceCategory}>
                           <ThemedText style={styles.adviceCategoryTitle}>Diet:</ThemedText>
                           <ThemedText style={styles.adviceCategoryText}>{advice.diet}</ThemedText>
@@ -1059,31 +1712,97 @@ export default function HealthOverviewScreen() {
 
           {activeTab === 'constitution' && (
             <View style={styles.wellnessAdviceCard}>
-              <ThemedText style={styles.wellnessAdviceTitle}>Constitution</ThemedText>
+              <ThemedText style={styles.wellnessAdviceTitle}>Body Constitution Tendency</ThemedText>
               {renderConstitutionRadarChart()}
-              <ThemedText style={styles.wellnessAdviceText}>
+              <View style={styles.constitutionContent}>
+                {comprehensiveAnalysis?.constitution ? (
+                  <>
+                    <ThemedText style={styles.constitutionLabel}>Constitution:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      {comprehensiveAnalysis.constitution.tendency}
+                    </ThemedText>
+                    <ThemedText style={styles.constitutionLabel}>Corresponding symptoms:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      {comprehensiveAnalysis.constitution.explanation}
+                    </ThemedText>
+                  </>
+                ) : (
+                  <>
+                    <ThemedText style={styles.constitutionLabel}>Constitution:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      Qi and Yang Deficiency
+                    </ThemedText>
+                    <ThemedText style={styles.constitutionLabel}>Corresponding symptoms:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
                 Your current data suggests a tendency toward mild Qi and Yang deficiency, reflected by signs like low morning energy, sensitivity to cold, occasional loose stools, and fatigue after exertion.
               </ThemedText>
+                  </>
+                )}
+              </View>
             </View>
           )}
 
           {activeTab === 'external' && (
             <View style={styles.wellnessAdviceCard}>
-              <ThemedText style={styles.wellnessAdviceTitle}>External Factors</ThemedText>
-              {renderWeatherSymptomChart()}
-              <ThemedText style={styles.wellnessAdviceText}>
+              <ThemedText style={styles.wellnessAdviceTitle}>Response to External Conditions</ThemedText>
+              {renderExternalPathogensChart()}
+              <View style={styles.constitutionContent}>
+                {comprehensiveAnalysis?.externalPathogen ? (
+                  <>
+                    <ThemedText style={styles.constitutionLabel}>External factors:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      {comprehensiveAnalysis.externalPathogen.pathogenType}
+                    </ThemedText>
+                    <ThemedText style={styles.constitutionLabel}>Corresponding symptoms:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      {comprehensiveAnalysis.externalPathogen.explanation}
+                    </ThemedText>
+                  </>
+                ) : (
+                  <>
+                    <ThemedText style={styles.constitutionLabel}>External factors:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      Wind-Cold or Dampness sensitivity
+                    </ThemedText>
+                    <ThemedText style={styles.constitutionLabel}>Corresponding symptoms:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
                 There may be mild sensitivity to Wind-Cold or Dampness, especially noticeable during seasonal changes or outdoor exposure (e.g., hiking). Occasional body heaviness or bloating may indicate dampness accumulation.
               </ThemedText>
+                  </>
+                )}
+              </View>
             </View>
           )}
 
-          {activeTab === 'organ' && (
+          {activeTab === 'internal' && (
             <View style={styles.wellnessAdviceCard}>
-              <ThemedText style={styles.wellnessAdviceTitle}>Organ Imbalance Tendency</ThemedText>
-              {renderOrganMap()}
-              <ThemedText style={styles.wellnessAdviceText}>
+              <ThemedText style={styles.wellnessAdviceTitle}>Internal Balance Reference</ThemedText>
+              {renderOrganFunctionChart()}
+              <View style={styles.constitutionContent}>
+                {comprehensiveAnalysis?.internalBalance ? (
+                  <>
+                    <ThemedText style={styles.constitutionLabel}>Patterns of Disharmony:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      {comprehensiveAnalysis.internalBalance.patterns.join(', ')}
+                    </ThemedText>
+                    <ThemedText style={styles.constitutionLabel}>Corresponding symptoms:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      {comprehensiveAnalysis.internalBalance.explanation}
+                    </ThemedText>
+                  </>
+                ) : (
+                  <>
+                    <ThemedText style={styles.constitutionLabel}>Patterns of Disharmony:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
+                      Heart Qi Deficiency, Spleen Qi Deficiency
+                    </ThemedText>
+                    <ThemedText style={styles.constitutionLabel}>Corresponding symptoms:</ThemedText>
+                    <ThemedText style={styles.constitutionSymptoms}>
                 Signs point to a pattern of Liver Qi stagnation with mild Spleen deficiency. This may relate to emotional stress, irregular eating habits, or weak digestion. Possible symptoms include premenstrual mood changes, digestive sluggishness, or occasional bloating.
               </ThemedText>
+                  </>
+                )}
+              </View>
             </View>
           )}
 
@@ -1159,6 +1878,10 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 60,
   },
+  avatarPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   userName: {
     fontSize: 25,
     fontWeight: 'bold',
@@ -1174,28 +1897,32 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     borderBottomWidth: 1,
     borderBottomColor: '#56696D',
+    paddingHorizontal: 5,
   },
   tab: {
     flex: 1,
-    paddingVertical: 2,
+    paddingVertical: 3,
+    paddingHorizontal: 2,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 28,
   },
   activeTab: {
     borderBottomWidth: 2,
-    borderBottomColor: '#58C8D0',
+    borderBottomColor: '#8ac8cf',
   },
   tabText: {
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: '600',
     color: '#56696D',
-    letterSpacing: 0.5,
+    letterSpacing: 0.2,
     textAlign: 'center',
   },
   activeTabText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: '#FFFFFF',
-    letterSpacing: 0.5,
+    letterSpacing: 0.2,
     textAlign: 'center',
   },
   wellnessAdviceCard: {
@@ -1316,11 +2043,45 @@ const styles = StyleSheet.create({
   },
   chartContainer: {
     marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingHorizontal: 0,
   },
   svgChart: {
-    width: '100%',
-    height: '100%',
+    alignSelf: 'center',
   },
+  svgChartWrapper: {
+    width: '100%',
+    maxWidth: 600,
+    paddingHorizontal: 24,
+    alignSelf: 'center',
+  },
+  constitutionContent: {
+    marginTop: 15,
+  },
+  constitutionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  constitutionLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#8ac8cf',
+  },
+  constitutionValue: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  constitutionSymptoms: {
+    fontSize: 14,
+    color: '#B0B0B0',
+    lineHeight: 20,
+    marginTop: 8,
+  },
+
 
   personalizedAdviceContainer: {
     marginBottom: 16,
@@ -1341,7 +2102,7 @@ const styles = StyleSheet.create({
   adviceCategoryTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#58C8D0',
+    color: '#8ac8cf',
     marginBottom: 4,
   },
   adviceCategoryText: {
@@ -1349,15 +2110,7 @@ const styles = StyleSheet.create({
     color: '#B0B0B0',
     lineHeight: 20,
   },
-  handAcupointContainer: {
-    width: 330,
-    height: 400,
-    alignSelf: 'center',
-  },
-  svgOverlay: {
-    width: '100%',
-    height: '100%',
-  },
+
   loadingAdviceContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1371,5 +2124,80 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#FF0000',
     fontSize: 14,
+  },
+  chartTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  organFunctionContainer: {
+    width: '90%',
+    maxWidth: 600,
+    paddingHorizontal: 24,
+    alignSelf: 'center',
+  },
+  organProgressItem: {
+    marginBottom: 15,
+  },
+  organProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  organName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  organStatus: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  progressBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressBarBackground: {
+    flex: 2,
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 4,
+    marginRight: 10,
+    minWidth: 200,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressValue: {
+    fontSize: 12,
+    color: '#B0B0B0',
+    minWidth: 35,
+    textAlign: 'right',
+  },
+  chartLegend: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: -5,
+    paddingRight: 20,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 15,
+  },
+  legendColor: {
+    width: 12,
+    height: 12,
+    borderRadius: 2,
+    marginRight: 5,
+  },
+  legendText: {
+    fontSize: 11,
+    color: '#B0B0B0',
   },
 });

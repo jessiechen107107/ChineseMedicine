@@ -6,7 +6,7 @@
 export const Colors = {
     text: '#FFFFFF',           // 白色文字
     background: '#1E2B2F',     // 整體深綠色背景
-    tint: '#58C8D0',           // 活動指示線條（藍色）
+    tint: '#8ac8cf',           // 活動指示線條（藍色）
     tabIconDefault: '#7F9496', // Tab Icon 顏色（未選取狀態）
     tabIconSelected: '#FFFFFF', // Tab Icon 顏色（已選取狀態）
     border: '#56696D',         // 邊框顏色：未選取分頁文字色

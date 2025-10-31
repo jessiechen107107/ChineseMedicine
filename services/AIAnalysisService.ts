@@ -1,6 +1,7 @@
 import { HealthData } from './HealthService';
 
-const OPENAI_API_KEY = '***REMOVED-LEAKED-OPENAI-KEY***';
+// 請設置環境變量 EXPO_PUBLIC_OPENAI_API_KEY
+const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
 export interface ConstitutionAnalysis {
@@ -30,11 +31,27 @@ export interface OrganImbalanceAnalysis {
   confidence: number;
 }
 
+export interface InternalBalanceAnalysis {
+  organStatus: string;
+  patterns: string[];
+  explanation: string;
+  recommendations: string[];
+  confidence: number;
+  organFunctionScores: {
+    heart: number;    // 0-100
+    liver: number;    // 0-100
+    spleen: number;   // 0-100
+    lung: number;     // 0-100
+    kidney: number;   // 0-100
+  };
+}
+
 export interface ComprehensiveAnalysis {
   wellnessAdvice: WellnessAdvice;
   constitution: ConstitutionAnalysis;
   externalPathogen: ExternalPathogenAnalysis;
   organImbalance: OrganImbalanceAnalysis;
+  internalBalance: InternalBalanceAnalysis;
 }
 
 export interface AssessmentData {
@@ -154,7 +171,8 @@ export class AIAnalysisService {
   async analyzeComprehensive(
     healthData: HealthData,
     assessmentData?: AssessmentData,
-    location: string = 'Taiwan'
+    location: string = 'Taiwan',
+    externalPathogensData?: any
   ): Promise<ComprehensiveAnalysis> {
     try {
       // First, validate the API key format
@@ -170,7 +188,7 @@ export class AIAnalysisService {
         return this.getFallbackComprehensiveAnalysis(healthData);
       }
 
-      const prompt = this.buildComprehensivePrompt(healthData, assessmentData, location);
+      const prompt = this.buildComprehensivePrompt(healthData, assessmentData, location, externalPathogensData);
       
       console.log('Making comprehensive AI analysis request...');
       
@@ -186,26 +204,12 @@ export class AIAnalysisService {
             content: prompt
           }
         ],
-        max_tokens: 1500,
+        // Keep token budget modest to avoid transport failures on some mobile networks
+        max_tokens: 1000,
         temperature: 0.7,
       };
 
-      const response = await fetch(OPENAI_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Comprehensive API Error Response:', errorText);
-        throw new Error(`Comprehensive API request failed: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
+      const data = await this.postChatCompletionWithRetry(requestBody, 'comprehensive');
       console.log('Comprehensive API Response:', data);
       
       const analysis = this.parseComprehensiveResponse(data.choices[0].message.content);
@@ -216,6 +220,55 @@ export class AIAnalysisService {
       // Fallback to basic analysis if API fails
       return this.getFallbackComprehensiveAnalysis(healthData);
     }
+  }
+
+  /**
+   * Helper: resilient POST to OpenAI with timeout and retries.
+   */
+  private async postChatCompletionWithRetry(body: any, label: string) {
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
+
+        const response = await fetch(OPENAI_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[${label}] API Error Response (${response.status}):`, errorText);
+          // Retry on 5xx server errors
+          if (response.status >= 500 && attempt < 3) {
+            await new Promise(r => setTimeout(r, attempt * 1500));
+            continue;
+          }
+          throw new Error(`${label} API request failed: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        return data;
+      } catch (err) {
+        lastErr = err;
+        console.error(`[${label}] request attempt ${attempt} failed:`, err);
+        // Retry on network failures/aborts
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, attempt * 1500));
+          continue;
+        }
+      }
+    }
+    throw lastErr ?? new Error('Unknown network error');
   }
 
   async analyzePersonalizedAdvice(
@@ -257,27 +310,53 @@ export class AIAnalysisService {
         temperature: 0.7,
       };
 
-      const response = await fetch(OPENAI_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
+      // 重試機制：最多嘗試3次
+      let lastError: Error | null = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          console.log(`API request attempt ${attempt}/3`);
+          
+          const response = await fetch(OPENAI_API_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            },
+            body: JSON.stringify(requestBody),
+          });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Personalized Advice API Error Response:', errorText);
-        throw new Error(`Personalized Advice API request failed: ${response.status} - ${errorText}`);
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Attempt ${attempt} - API Error Response:`, errorText);
+            
+            // 如果是5xx錯誤，嘗試重試
+            if (response.status >= 500 && attempt < 3) {
+              console.log(`Server error (${response.status}), retrying in ${attempt * 2} seconds...`);
+              await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+              continue;
+            }
+            
+            throw new Error(`Personalized Advice API request failed: ${response.status} - ${errorText}`);
+          }
+
+          const data = await response.json();
+          console.log('Personalized Advice API Response:', data);
+          
+          const advice = this.parsePersonalizedAdviceResponse(data.choices[0].message.content);
+          
+          return advice;
+        } catch (error) {
+          lastError = error as Error;
+          if (attempt < 3) {
+            console.log(`Attempt ${attempt} failed, retrying...`, error);
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          }
+        }
       }
-
-      const data = await response.json();
-      console.log('Personalized Advice API Response:', data);
       
-      const advice = this.parsePersonalizedAdviceResponse(data.choices[0].message.content);
+      // 如果所有重試都失敗，拋出最後的錯誤
+      throw lastError;
       
-      return advice;
     } catch (error) {
       console.error('Error in personalized advice analysis:', error);
       // Fallback to basic analysis if API fails
@@ -364,16 +443,17 @@ Format your response as JSON:
   private buildComprehensivePrompt(
     healthData: HealthData,
     assessmentData?: AssessmentData,
-    location: string = 'Taiwan'
+    location: string = 'Taiwan',
+    externalPathogensData?: any
   ): string {
     const climate = this.getClimateDescription(location);
     
-    let prompt = `Provide a comprehensive Traditional Chinese Medicine analysis based on the following data:
+    let prompt = `As a TCM wellness expert, provide comprehensive analysis based on the following data:
 
 Health Data:
 - Heart Rate: ${healthData.heartRate} bpm
 - Sleep Duration: ${healthData.sleepDuration} hours
-- Steps: ${healthData.steps}
+- Daily Steps: ${healthData.steps}
 - Blood Oxygen: ${healthData.bloodOxygen}%
 - Menstrual Cycle: ${healthData.averageCycleLength} days (if applicable)
 - Period Duration: ${healthData.periodDuration} days (if applicable)
@@ -382,12 +462,26 @@ Location & Climate: ${location} - ${climate}
 
 `;
 
+    if (externalPathogensData) {
+      prompt += `External Pathogens Analysis:
+- Wind Pathogen Level: ${externalPathogensData.wind}% (風邪)
+- Cold Pathogen Level: ${externalPathogensData.cold}% (寒邪)
+- Dampness Pathogen Level: ${externalPathogensData.dampness}% (濕邪)
+- Dryness Pathogen Level: ${externalPathogensData.dryness}% (燥邪)
+- Heat Pathogen Level: ${externalPathogensData.heat}% (火邪)
+- Summer Heat Pathogen Level: ${externalPathogensData.summerHeat}% (暑邪)
+
+`;
+    }
+
     if (assessmentData) {
-      prompt += `Assessment History:
-- Tongue Color: ${assessmentData.observation.tongueColor}
-- Face Color: ${assessmentData.observation.faceColor}
+      prompt += `Assessment Records:
+- Tongue Observation: ${assessmentData.observation.tongueColor}
+- Facial Color: ${assessmentData.observation.faceColor}
 - Breath Quality: ${assessmentData.smell.badBreath}
-- Reported Symptoms: ${assessmentData.inquiry.selectedSymptoms.join(', ')}
+- Digestive Issues: ${assessmentData.smell.flatulence}
+- Symptoms: ${assessmentData.inquiry.selectedSymptoms.join(', ')}
+- Additional Symptoms: ${assessmentData.inquiry.customSymptoms}
 - Pulse Rate: ${assessmentData.pulse.pulseRate} bpm
 - Pulse Type: ${assessmentData.pulse.pulseType}
 
@@ -398,10 +492,27 @@ Location & Climate: ${location} - ${climate}
 
 1. WELLNESS ADVICE: Personalized advice considering health data, climate, and lifestyle
 2. CONSTITUTIONAL TENDENCY: Primary constitution type (Qi deficiency, Blood deficiency, Damp-heat, Yin deficiency, Yang deficiency, or Balanced)
-3. EXTERNAL PATHOGENIC FACTORS: Assessment of external pathogens (Wind-Heat, Wind-Cold, Dampness, Dryness, etc.)
+   - Analyze heart rate changes, sleep performance, and activity data from Health app
+   - Consider patterns in daily energy levels, stress responses, and recovery
+   - Provide constitution type and corresponding symptoms in English
+   - Focus on how the user's physiological data reflects their body constitution tendency
+3. EXTERNAL PATHOGENIC FACTORS: Assessment based on the external pathogens data provided
+   - Analyze the specific pathogen levels (Wind, Cold, Dampness, Dryness, Heat, Summer Heat)
+   - Focus on the 2-3 highest pathogen levels and their potential health impacts
+   - Consider how these external factors correlate with the user's health data
+   - Provide specific TCM observations about environmental sensitivity patterns
 4. ORGAN IMBALANCE PATTERNS: Evaluation of organ systems (Heart, Liver, Spleen, Lung, Kidney imbalances)
+5. INTERNAL BALANCE ANALYSIS: Assess the functional status of five organs based on health data
+   - Provide specific function scores (0-100) for each organ: Heart, Liver, Spleen, Lung, Kidney
+   - Heart function: Based on heart rate patterns, sleep quality, stress indicators (normal: 70-85, good sleep and stable HR boost score)
+   - Liver function: Based on stress levels, sleep regularity, emotional balance (high stress or poor sleep patterns reduce score)
+   - Spleen function: Based on activity levels, digestive health indicators, energy stability (low activity reduces score significantly)
+   - Lung function: Based on blood oxygen levels, respiratory indicators, exercise capacity (low oxygen or poor activity affects score)
+   - Kidney function: Based on overall vitality, sleep restoration, fundamental energy (poor sleep and low activity impact score)
+   - Scores should vary meaningfully based on actual data patterns, not default to similar values
 
 Consider the climate environment effects (${climate}) on the analysis.
+${externalPathogensData ? 'Pay special attention to the external pathogens data and correlate it with health symptoms and patterns.' : 'Pay special attention to how environmental factors may correlate with Health app data showing stress changes, sleep variations, and energy fluctuations.'}
 
 Format your response as JSON:
 {
@@ -411,14 +522,14 @@ Format your response as JSON:
     "confidence": confidence_score
   },
   "constitution": {
-    "tendency": "constitution type",
-    "explanation": "detailed explanation",
+    "tendency": "constitution type in English (e.g., Qi Deficiency Constitution, Yin Deficiency Constitution)",
+    "explanation": "possible corresponding symptoms in English based on heart rate changes, sleep performance, and activity data. Focus on observable symptoms that reflect this constitution type (e.g., fatigue after exertion, sensitivity to cold, poor sleep quality, low energy levels)",
     "recommendations": ["rec 1", "rec 2", "rec 3"],
     "confidence": confidence_score
   },
   "externalPathogen": {
-    "pathogenType": "pathogen type or None",
-    "explanation": "detailed explanation",
+    "pathogenType": "Primary external pathogen type based on the provided pathogen data (e.g., Wind-Cold, Dampness-Heat, Wind-Heat, etc.)",
+    "explanation": "As a TCM practitioner, analyze the specific external pathogen levels provided. Focus on the 2-3 highest pathogen values and explain how they correlate with the user's health data. Describe the potential symptoms and health impacts of these dominant external factors. Mention specific conditions like Wind-Cold sensitivity, Dampness accumulation, Heat patterns, etc. based on the actual data provided.",
     "recommendations": ["rec 1", "rec 2", "rec 3"],
     "confidence": confidence_score
   },
@@ -427,6 +538,20 @@ Format your response as JSON:
     "explanation": "detailed explanation",
     "recommendations": ["rec 1", "rec 2", "rec 3"],
     "confidence": confidence_score
+  },
+  "internalBalance": {
+    "organStatus": "Overall organ function status in English",
+    "patterns": ["Specific TCM pattern names in English based on health data analysis. Examples: Heart Qi Deficiency, Liver Qi Stagnation, Spleen Qi Deficiency, Lung Qi Deficiency, Kidney Yang Deficiency, Liver Fire Blazing, Heart Fire, Spleen Yang Deficiency, Kidney Yin Deficiency, Liver Blood Deficiency, Heart Blood Deficiency, Lung Yin Deficiency, Spleen Deficiency with Dampness, Phlegm misting the Heart, Wind-Cold Invading the Lung, etc. Select 2-3 most relevant patterns based on the health data."],
+    "explanation": "As a TCM practitioner, analyze the health data (heart rate, sleep quality, activity levels, stress indicators) to identify which organs may have dysfunction. Focus on the organs that show abnormal function based on the data patterns. Provide a professional assessment describing the potential physical symptoms that may correspond to these organ dysfunctions. Do not list each organ individually - instead, provide a cohesive analysis of the main symptoms that may arise from the identified organ imbalances. Format: 'Organ Function Status' followed by 'Possible Corresponding Symptoms' - all in English.",
+    "recommendations": ["rec 1", "rec 2", "rec 3"],
+    "confidence": confidence_score,
+    "organFunctionScores": {
+      "heart": "number_0_to_100 - Assess based on heart rate stability (60-80 = good, >90 or <50 = concerning), sleep quality (7-8h = good), stress patterns. Good indicators = 75-90, average = 50-75, poor = 30-50",
+      "liver": "number_0_to_100 - Assess based on stress management (reflected in HR variability), sleep regularity, emotional stability patterns. High stress/poor sleep = lower scores",
+      "spleen": "number_0_to_100 - Heavily weight activity levels (>8000 steps = good, 5000-8000 = average, <5000 = poor), energy stability, digestive function indicators",
+      "lung": "number_0_to_100 - Focus on blood oxygen levels (>97% = excellent, 95-97% = good, <95% = concerning), exercise capacity, respiratory health",
+      "kidney": "number_0_to_100 - Assess fundamental vitality through sleep restoration quality, overall energy patterns, basic physiological stability"
+    }
   }
 }`;
 
@@ -555,6 +680,20 @@ Format your response as JSON:
             explanation: parsed.organImbalance?.explanation || 'Organ systems appear to be functioning harmoniously.',
             recommendations: parsed.organImbalance?.recommendations || ['Continue current practices'],
             confidence: parsed.organImbalance?.confidence || 5
+          },
+          internalBalance: {
+            organStatus: parsed.internalBalance?.organStatus || 'Balanced Internal Function',
+            patterns: parsed.internalBalance?.patterns || ['Balanced Organ Function'],
+            explanation: parsed.internalBalance?.explanation || 'Organ Function Status: Generally balanced internal function. Possible Corresponding Symptoms: No significant symptoms related to organ dysfunction are indicated by your current health data patterns.',
+            recommendations: parsed.internalBalance?.recommendations || ['Continue healthy lifestyle'],
+            confidence: parsed.internalBalance?.confidence || 5,
+            organFunctionScores: parsed.internalBalance?.organFunctionScores || {
+              heart: 75,
+              liver: 75,
+              spleen: 75,
+              lung: 75,
+              kidney: 75
+            }
           }
         };
       }
@@ -657,19 +796,69 @@ Format your response as JSON:
         explanation: 'Organ systems appear to be functioning harmoniously.',
         recommendations: ['Continue current practices'],
         confidence: 5
+      },
+      internalBalance: {
+        organStatus: 'Balanced Internal Function',
+        patterns: ['Heart Qi Deficiency', 'Spleen Qi Deficiency'],
+        explanation: 'Organ Function Status: Generally balanced internal function. Possible Corresponding Symptoms: No significant symptoms related to organ dysfunction are indicated by your current health data patterns.',
+        recommendations: ['Continue healthy lifestyle'],
+        confidence: 5,
+        organFunctionScores: {
+          heart: 75,
+          liver: 75,
+          spleen: 75,
+          lung: 75,
+          kidney: 75
+        }
       }
     };
   }
 
   private getFallbackPersonalizedAdvice(healthData: HealthData): PersonalizedAdvice {
-    // Basic fallback analysis when API is unavailable
-    return {
-      diet: 'Maintain a balanced diet',
-      sleep: 'Maintain a regular sleep schedule',
-      emotions: 'Maintain a positive emotional state',
-      exercise: 'Maintain a balanced exercise routine',
-      acupressure: 'Consider acupressure therapy for relaxation'
-    };
+    // 基於健康數據提供個性化的fallback建議
+    let diet = 'Maintain a balanced diet with warm, cooked foods';
+    let sleep = 'Maintain a regular sleep schedule, sleeping before 11 PM';
+    let emotions = 'Practice stress management through meditation or gentle activities';
+    let exercise = 'Engage in moderate exercise like walking or tai chi';
+    let acupressure = 'Consider gentle acupressure on Yintang and Baihui points for relaxation';
+
+    // 根據心率調整建議
+    if (healthData.heartRate > 90) {
+      diet = 'Focus on cooling foods like cucumber, watermelon, and green tea to calm excessive heat';
+      emotions = 'Practice calming activities like deep breathing and avoid overstimulation';
+      exercise = 'Choose gentle exercises like slow walking or stretching to avoid overexertion';
+      acupressure = 'Apply gentle pressure to Shenmen and Yintang points to calm the mind';
+    } else if (healthData.heartRate < 60) {
+      diet = 'Include warming foods like ginger, cinnamon, and cooked grains to boost energy';
+      exercise = 'Gradually increase activity with gentle movement like tai chi or qigong';
+      acupressure = 'Stimulate Baihui and Qihai points to boost vital energy';
+    }
+
+    // 根據睡眠調整建議
+    if (healthData.sleepDuration < 6) {
+      sleep = 'Prioritize extending sleep to 7-8 hours. Create a calming bedtime routine starting 2 hours before sleep';
+      emotions = 'Practice evening meditation or gentle stretching to prepare for better rest';
+      diet = 'Avoid caffeine after 2 PM and have a light dinner 3 hours before bedtime';
+    } else if (healthData.sleepDuration > 9) {
+      sleep = 'Aim for 7-8 hours of sleep. Consider setting a consistent wake time to regulate your circadian rhythm';
+      exercise = 'Increase daily activity to promote better sleep quality and daytime energy';
+    }
+
+    // 根據活動量調整建議
+    if (healthData.steps < 5000) {
+      exercise = 'Gradually increase daily steps to 8000+. Start with short 10-minute walks after meals';
+      diet = 'Include energizing foods like dates, walnuts, and lean proteins to support increased activity';
+      emotions = 'Set small, achievable movement goals to build confidence and motivation';
+    }
+
+    // 根據血氧調整建議
+    if (healthData.bloodOxygen < 95) {
+      exercise = 'Practice deep breathing exercises and gentle cardio to improve oxygen circulation';
+      acupressure = 'Apply pressure to Feishu and Danzhong points to support respiratory function';
+      diet = 'Include foods rich in iron and vitamin C to support oxygen transport';
+    }
+
+    return { diet, sleep, emotions, exercise, acupressure };
   }
 }
 

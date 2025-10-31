@@ -1,10 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import AppleHealthKit, { HealthKitPermissions, HealthValue } from 'react-native-health';
 
 export interface HealthData {
   steps: number;
   heartRate: number;
   heartRateVariability: number;
+  averageRHR: number; // 平均靜息心率
+  averageHRV: number; // 平均心率變異性
   bloodOxygen: number;
   sleepDuration: number;
   sleepQuality: number;
@@ -28,6 +31,7 @@ export interface HealthPermissions {
 
 class HealthService {
   private isConnected: boolean = false;
+  private initInProgress: Promise<void> | null = null;
   private permissions: HealthPermissions = {
     steps: false,
     heartRate: false,
@@ -40,6 +44,7 @@ class HealthService {
 
   private readonly HEALTH_DATA_KEY = '@health_data';
   private readonly HEALTH_SYNC_KEY = '@health_sync_enabled';
+  private hasRequestedNativePermissions: boolean = false;
 
   // 檢查是否可以訪問健康數據
   async isHealthDataAvailable(): Promise<boolean> {
@@ -61,7 +66,33 @@ class HealthService {
   // 請求健康數據權限並啟用同步
   async requestPermissions(): Promise<HealthPermissions> {
     try {
-      // 模擬權限請求成功
+      if (Platform.OS === 'ios') {
+        const permissions: HealthKitPermissions = {
+          permissions: {
+            read: [
+              AppleHealthKit.Constants.Permissions.HeartRate,
+              AppleHealthKit.Constants.Permissions.HeartRateVariability,
+              AppleHealthKit.Constants.Permissions.Steps,
+              AppleHealthKit.Constants.Permissions.SleepAnalysis,
+              AppleHealthKit.Constants.Permissions.BloodOxygen,
+            ],
+            write: [],
+          },
+        } as HealthKitPermissions;
+
+        await new Promise<void>((resolve, reject) => {
+          AppleHealthKit.initHealthKit(permissions, (error: string) => {
+            if (error) {
+              console.warn('[HealthKit] init error:', error);
+              reject(new Error(error));
+              return;
+            }
+            this.hasRequestedNativePermissions = true;
+            resolve();
+          });
+        });
+      }
+
       this.permissions = {
         steps: true,
         heartRate: true,
@@ -85,6 +116,76 @@ class HealthService {
       console.error('Error requesting health permissions:', error);
       return this.permissions;
     }
+  }
+
+  // 僅初始化一次 HealthKit（避免重覆彈窗與重覆初始化）
+  async initHealthKitOnce(): Promise<void> {
+    if (this.isConnected || this.hasRequestedNativePermissions) {
+      return;
+    }
+    if (this.initInProgress) {
+      await this.initInProgress;
+      return;
+    }
+    this.initInProgress = (async () => {
+      try {
+        await this.requestPermissions();
+      } finally {
+        this.initInProgress = null;
+      }
+    })();
+    await this.initInProgress;
+  }
+
+  // 從 HealthKit 讀取心跳與 HRV（最近 N 小時）
+  async fetchRecentHeartMetrics(hoursBack: number = 24): Promise<{ heartRate: number | null; hrv: number | null; samples: { hr: HealthValue[]; hrv: HealthValue[] } }>{
+    if (Platform.OS !== 'ios') {
+      return { heartRate: null, hrv: null, samples: { hr: [], hrv: [] } };
+    }
+
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - hoursBack * 60 * 60 * 1000);
+
+    const toISO = (d: Date) => d.toISOString();
+
+    const hrSamples: HealthValue[] = await new Promise((resolve) => {
+      AppleHealthKit.getHeartRateSamples({ startDate: toISO(startDate), endDate: toISO(endDate), ascending: false, limit: 1000 }, (err: string, results: HealthValue[]) => {
+        if (err) {
+          console.warn('[HealthKit] getHeartRateSamples error:', err);
+          resolve([]);
+          return;
+        }
+        resolve(results || []);
+      });
+    });
+
+    const hrvSamples: HealthValue[] = await new Promise((resolve) => {
+      AppleHealthKit.getHeartRateVariabilitySamples({ startDate: toISO(startDate), endDate: toISO(endDate), ascending: false, limit: 1000 }, (err: string, results: HealthValue[]) => {
+        if (err) {
+          console.warn('[HealthKit] getHeartRateVariabilitySamples error:', err);
+          resolve([]);
+          return;
+        }
+        resolve(results || []);
+      });
+    });
+
+    const latestHR = hrSamples.length > 0 ? Number(hrSamples[0].value) : null;
+    const latestHRV = hrvSamples.length > 0 ? Number(hrvSamples[0].value) : null; // SDNN in ms
+
+    return { heartRate: latestHR, hrv: latestHRV, samples: { hr: hrSamples, hrv: hrvSamples } };
+  }
+
+  // 提供給其他畫面直接呼叫的函式：取得 HR 與 HRV
+  async getHRVAndHeartRate(hoursBack: number = 24): Promise<{ heartRate: number | null; hrv: number | null; samples: { hr: HealthValue[]; hrv: HealthValue[] } }>{
+    try {
+      if (Platform.OS === 'ios' && !this.hasRequestedNativePermissions) {
+        await this.initHealthKitOnce();
+      }
+    } catch (e) {
+      // 即使初始化失敗，仍嘗試讀取（會回傳空資料結構）
+    }
+    return this.fetchRecentHeartMetrics(hoursBack);
   }
 
   // 初始化歷史健康數據
@@ -123,6 +224,8 @@ class HealthService {
       steps: random(3000, 12000),
       heartRate: random(60, 90),
       heartRateVariability: random(30, 50),
+      averageRHR: random(45, 70), // 平均靜息心率
+      averageHRV: random(25, 60), // 平均心率變異性
       bloodOxygen: random(95, 100),
       sleepDuration: random(6, 9),
       sleepQuality: random(60, 95),
@@ -136,8 +239,18 @@ class HealthService {
   }
 
   // 獲取健康數據
-  async getHealthData(date: Date = new Date()): Promise<HealthData> {
+  async getHealthData(date: Date = new Date()): Promise<HealthData | null> {
     try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const targetDate = new Date(date);
+      targetDate.setHours(0, 0, 0, 0);
+      
+      // 如果是未來日期，返回null
+      if (targetDate > today) {
+        return null;
+      }
+
       const dateString = date.toISOString().split('T')[0];
       const storedData = await AsyncStorage.getItem(this.HEALTH_DATA_KEY);
       
@@ -151,7 +264,7 @@ class HealthService {
         }
       }
 
-      // 如果沒有儲存的數據，生成新的
+      // 只為過去和今天的日期生成數據
       const newData = this.generateHealthDataForDate(date);
       
       // 儲存新數據
@@ -162,6 +275,16 @@ class HealthService {
       return newData;
     } catch (error) {
       console.error('Error fetching health data:', error);
+      // 即使出錯，也不為未來日期返回數據
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const targetDate = new Date(date);
+      targetDate.setHours(0, 0, 0, 0);
+      
+      if (targetDate > today) {
+        return null;
+      }
+      
       return this.generateHealthDataForDate(date);
     }
   }
@@ -261,3 +384,8 @@ class HealthService {
 }
 
 export const healthService = new HealthService(); 
+
+// 方便在畫面中直接 import 使用的函式
+export async function getHRVAndHeartRate(hoursBack: number = 24) {
+  return healthService.getHRVAndHeartRate(hoursBack);
+}
