@@ -114,11 +114,7 @@ export class AIAnalysisService {
       }
 
       const prompt = this.buildConstitutionPrompt(healthData, assessmentData, location);
-      
-      console.log('Making API request to OpenAI...');
-      console.log('API Key exists:', !!OPENAI_API_KEY);
-      console.log('API Key starts with:', OPENAI_API_KEY.substring(0, 10) + '...');
-      
+
       const requestBody = {
         model: 'gpt-3.5-turbo', // Changed from gpt-4 to gpt-3.5-turbo for better compatibility
         messages: [
@@ -135,8 +131,6 @@ export class AIAnalysisService {
         temperature: 0.7,
       };
 
-      console.log('Request body:', JSON.stringify(requestBody, null, 2));
-
       const response = await fetch(OPENAI_API_URL, {
         method: 'POST',
         headers: {
@@ -146,9 +140,6 @@ export class AIAnalysisService {
         body: JSON.stringify(requestBody),
       });
 
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
-
       if (!response.ok) {
         const errorText = await response.text();
         console.error('API Error Response:', errorText);
@@ -156,8 +147,7 @@ export class AIAnalysisService {
       }
 
       const data = await response.json();
-      console.log('API Response:', data);
-      
+
       const analysis = this.parseAIResponse(data.choices[0].message.content);
       
       return analysis;
@@ -189,9 +179,7 @@ export class AIAnalysisService {
       }
 
       const prompt = this.buildComprehensivePrompt(healthData, assessmentData, location, externalPathogensData);
-      
-      console.log('Making comprehensive AI analysis request...');
-      
+
       const requestBody = {
         model: 'gpt-3.5-turbo',
         messages: [
@@ -210,8 +198,7 @@ export class AIAnalysisService {
       };
 
       const data = await this.postChatCompletionWithRetry(requestBody, 'comprehensive');
-      console.log('Comprehensive API Response:', data);
-      
+
       const analysis = this.parseComprehensiveResponse(data.choices[0].message.content);
       
       return analysis;
@@ -291,9 +278,7 @@ export class AIAnalysisService {
       }
 
       const prompt = this.buildPersonalizedAdvicePrompt(healthData, assessmentData, location);
-      
-      console.log('Making personalized advice AI analysis request...');
-      
+
       const requestBody = {
         model: 'gpt-3.5-turbo',
         messages: [
@@ -314,8 +299,6 @@ export class AIAnalysisService {
       let lastError: Error | null = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          console.log(`API request attempt ${attempt}/3`);
-          
           const response = await fetch(OPENAI_API_URL, {
             method: 'POST',
             headers: {
@@ -331,7 +314,6 @@ export class AIAnalysisService {
             
             // 如果是5xx錯誤，嘗試重試
             if (response.status >= 500 && attempt < 3) {
-              console.log(`Server error (${response.status}), retrying in ${attempt * 2} seconds...`);
               await new Promise(resolve => setTimeout(resolve, attempt * 2000));
               continue;
             }
@@ -340,15 +322,13 @@ export class AIAnalysisService {
           }
 
           const data = await response.json();
-          console.log('Personalized Advice API Response:', data);
-          
+
           const advice = this.parsePersonalizedAdviceResponse(data.choices[0].message.content);
           
           return advice;
         } catch (error) {
           lastError = error as Error;
           if (attempt < 3) {
-            console.log(`Attempt ${attempt} failed, retrying...`, error);
             await new Promise(resolve => setTimeout(resolve, attempt * 1000));
           }
         }
@@ -366,7 +346,6 @@ export class AIAnalysisService {
 
   private async testAPIKey(): Promise<boolean> {
     try {
-      console.log('Testing API key...');
       const response = await fetch('https://api.openai.com/v1/models', {
         method: 'GET',
         headers: {
@@ -374,10 +353,7 @@ export class AIAnalysisService {
         },
       });
 
-      console.log('API key test response status:', response.status);
-      
       if (response.ok) {
-        console.log('API key is valid');
         return true;
       } else {
         const errorText = await response.text();
