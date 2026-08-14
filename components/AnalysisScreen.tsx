@@ -4,11 +4,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // TCM Analysis function
 async function performTCMAnalysis(data: any) {
-  const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
-  const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
-  
-  if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith('sk-')) {
-    throw new Error('Invalid API key');
+  const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+  const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+
+  if (!GEMINI_API_KEY) {
+    throw new Error('Missing Gemini API key');
   }
 
   // Use user input directly
@@ -47,26 +47,23 @@ Response format:
 
 Please respond in English using TCM terminology and concepts, with a gentle practitioner tone. Avoid medical diagnostic language and focus on wellness and nourishment approaches. Pay special attention to the patient's written concerns and address their specific needs.`;
 
-  const response = await fetch(OPENAI_API_URL, {
+  const response = await fetch(GEMINI_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'x-goog-api-key': GEMINI_API_KEY,
     },
     body: JSON.stringify({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a professional Traditional Chinese Medicine practitioner with extensive clinical experience. Provide TCM wellness guidance with a warm, professional tone, avoiding medical diagnostic terminology and focusing on nourishment and balance.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
+      systemInstruction: {
+        parts: [{ text: 'You are a professional Traditional Chinese Medicine practitioner with extensive clinical experience. Provide TCM wellness guidance with a warm, professional tone, avoiding medical diagnostic terminology and focusing on nourishment and balance.' }]
+      },
+      contents: [
+        { role: 'user', parts: [{ text: prompt }] }
       ],
-      max_tokens: 1200,
-      temperature: 0.7,
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.7,
+      },
     }),
   });
 
@@ -75,7 +72,7 @@ Please respond in English using TCM terminology and concepts, with a gentle prac
   }
 
   const result = await response.json();
-  const content = result.choices[0].message.content;
+  const content = result.candidates[0].content.parts[0].text;
   
   try {
     return JSON.parse(content);

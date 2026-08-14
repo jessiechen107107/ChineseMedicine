@@ -1,7 +1,7 @@
 import { HealthData } from './HealthService';
 
-const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
 
 export interface SleepQualityResult {
   qualityScore: number; // 0-100
@@ -16,26 +16,23 @@ class SleepQualityService {
       const prompt = this.buildAnalysisPrompt(healthData);
       
       const requestBody = {
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a sleep quality analysis expert. Analyze the provided health data and estimate sleep quality based on sleep duration, heart rate, and other relevant metrics. Provide a score from 0-100 and detailed explanation.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
+        systemInstruction: {
+          parts: [{ text: 'You are a sleep quality analysis expert. Analyze the provided health data and estimate sleep quality based on sleep duration, heart rate, and other relevant metrics. Provide a score from 0-100 and detailed explanation.' }]
+        },
+        contents: [
+          { role: 'user', parts: [{ text: prompt }] }
         ],
-        max_tokens: 500,
-        temperature: 0.3,
+        generationConfig: {
+          maxOutputTokens: 500,
+          temperature: 0.3,
+        },
       };
 
-      const response = await fetch(OPENAI_API_URL, {
+      const response = await fetch(GEMINI_API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'x-goog-api-key': GEMINI_API_KEY,
         },
         body: JSON.stringify(requestBody),
       });
@@ -45,7 +42,7 @@ class SleepQualityService {
       }
 
       const data = await response.json();
-      const analysis = this.parseSleepQualityResponse(data.choices[0].message.content);
+      const analysis = this.parseSleepQualityResponse(data.candidates[0].content.parts[0].text);
       
       return analysis;
     } catch (error) {

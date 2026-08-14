@@ -1,8 +1,9 @@
 import { HealthData } from './HealthService';
 
-// 請設置環境變量 EXPO_PUBLIC_OPENAI_API_KEY
-const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+// 請設置環境變量 EXPO_PUBLIC_GEMINI_API_KEY (取得: https://aistudio.google.com/apikey)
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+const GEMINI_MODEL = 'gemini-flash-latest';
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export interface ConstitutionAnalysis {
   tendency: string;
@@ -101,8 +102,8 @@ export class AIAnalysisService {
   ): Promise<ConstitutionAnalysis> {
     try {
       // First, validate the API key format
-      if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith('sk-')) {
-        console.error('Invalid API key format');
+      if (!GEMINI_API_KEY) {
+        console.error('Missing Gemini API key');
         return this.getFallbackAnalysis(healthData);
       }
 
@@ -116,26 +117,23 @@ export class AIAnalysisService {
       const prompt = this.buildConstitutionPrompt(healthData, assessmentData, location);
 
       const requestBody = {
-        model: 'gpt-3.5-turbo', // Changed from gpt-4 to gpt-3.5-turbo for better compatibility
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a Traditional Chinese Medicine (TCM) expert specializing in constitutional analysis. Provide accurate, professional analysis based on the given health data and environmental factors.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
+        systemInstruction: {
+          parts: [{ text: 'You are a Traditional Chinese Medicine (TCM) expert specializing in constitutional analysis. Provide accurate, professional analysis based on the given health data and environmental factors.' }]
+        },
+        contents: [
+          { role: 'user', parts: [{ text: prompt }] }
         ],
-        max_tokens: 800,
-        temperature: 0.7,
+        generationConfig: {
+          maxOutputTokens: 800,
+          temperature: 0.7,
+        },
       };
 
-      const response = await fetch(OPENAI_API_URL, {
+      const response = await fetch(GEMINI_API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'x-goog-api-key': GEMINI_API_KEY,
         },
         body: JSON.stringify(requestBody),
       });
@@ -148,8 +146,8 @@ export class AIAnalysisService {
 
       const data = await response.json();
 
-      const analysis = this.parseAIResponse(data.choices[0].message.content);
-      
+      const analysis = this.parseAIResponse(data.candidates[0].content.parts[0].text);
+
       return analysis;
     } catch (error) {
       console.error('Error analyzing constitution:', error);
@@ -166,8 +164,8 @@ export class AIAnalysisService {
   ): Promise<ComprehensiveAnalysis> {
     try {
       // First, validate the API key format
-      if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith('sk-')) {
-        console.error('Invalid API key format');
+      if (!GEMINI_API_KEY) {
+        console.error('Missing Gemini API key');
         return this.getFallbackComprehensiveAnalysis(healthData);
       }
 
@@ -181,26 +179,23 @@ export class AIAnalysisService {
       const prompt = this.buildComprehensivePrompt(healthData, assessmentData, location, externalPathogensData);
 
       const requestBody = {
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a comprehensive Traditional Chinese Medicine (TCM) expert. Analyze health data and provide detailed insights on wellness advice, constitutional tendencies, external pathogenic factors, and organ imbalances. Consider environmental and climate factors in your analysis.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
+        systemInstruction: {
+          parts: [{ text: 'You are a comprehensive Traditional Chinese Medicine (TCM) expert. Analyze health data and provide detailed insights on wellness advice, constitutional tendencies, external pathogenic factors, and organ imbalances. Consider environmental and climate factors in your analysis.' }]
+        },
+        contents: [
+          { role: 'user', parts: [{ text: prompt }] }
         ],
         // Keep token budget modest to avoid transport failures on some mobile networks
-        max_tokens: 1000,
-        temperature: 0.7,
+        generationConfig: {
+          maxOutputTokens: 1000,
+          temperature: 0.7,
+        },
       };
 
       const data = await this.postChatCompletionWithRetry(requestBody, 'comprehensive');
 
-      const analysis = this.parseComprehensiveResponse(data.choices[0].message.content);
-      
+      const analysis = this.parseComprehensiveResponse(data.candidates[0].content.parts[0].text);
+
       return analysis;
     } catch (error) {
       console.error('Error in comprehensive analysis:', error);
@@ -210,7 +205,7 @@ export class AIAnalysisService {
   }
 
   /**
-   * Helper: resilient POST to OpenAI with timeout and retries.
+   * Helper: resilient POST to Gemini with timeout and retries.
    */
   private async postChatCompletionWithRetry(body: any, label: string) {
     let lastErr: any = null;
@@ -219,12 +214,12 @@ export class AIAnalysisService {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
 
-        const response = await fetch(OPENAI_API_URL, {
+        const response = await fetch(GEMINI_API_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'x-goog-api-key': GEMINI_API_KEY,
           },
           body: JSON.stringify(body),
           signal: controller.signal,
@@ -265,8 +260,8 @@ export class AIAnalysisService {
   ): Promise<PersonalizedAdvice> {
     try {
       // First, validate the API key format
-      if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith('sk-')) {
-        console.error('Invalid API key format');
+      if (!GEMINI_API_KEY) {
+        console.error('Missing Gemini API key');
         return this.getFallbackPersonalizedAdvice(healthData);
       }
 
@@ -280,30 +275,27 @@ export class AIAnalysisService {
       const prompt = this.buildPersonalizedAdvicePrompt(healthData, assessmentData, location);
 
       const requestBody = {
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a Traditional Chinese Medicine (TCM) wellness expert specializing in personalized lifestyle advice. Analyze health data, assessment records, and environmental factors to provide specific recommendations for diet, sleep, emotions, exercise, and acupressure therapy.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
+        systemInstruction: {
+          parts: [{ text: 'You are a Traditional Chinese Medicine (TCM) wellness expert specializing in personalized lifestyle advice. Analyze health data, assessment records, and environmental factors to provide specific recommendations for diet, sleep, emotions, exercise, and acupressure therapy.' }]
+        },
+        contents: [
+          { role: 'user', parts: [{ text: prompt }] }
         ],
-        max_tokens: 1000,
-        temperature: 0.7,
+        generationConfig: {
+          maxOutputTokens: 1000,
+          temperature: 0.7,
+        },
       };
 
       // 重試機制：最多嘗試3次
       let lastError: Error | null = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const response = await fetch(OPENAI_API_URL, {
+          const response = await fetch(GEMINI_API_URL, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${OPENAI_API_KEY}`,
+              'x-goog-api-key': GEMINI_API_KEY,
             },
             body: JSON.stringify(requestBody),
           });
@@ -311,19 +303,19 @@ export class AIAnalysisService {
           if (!response.ok) {
             const errorText = await response.text();
             console.error(`Attempt ${attempt} - API Error Response:`, errorText);
-            
+
             // 如果是5xx錯誤，嘗試重試
             if (response.status >= 500 && attempt < 3) {
               await new Promise(resolve => setTimeout(resolve, attempt * 2000));
               continue;
             }
-            
+
             throw new Error(`Personalized Advice API request failed: ${response.status} - ${errorText}`);
           }
 
           const data = await response.json();
 
-          const advice = this.parsePersonalizedAdviceResponse(data.choices[0].message.content);
+          const advice = this.parsePersonalizedAdviceResponse(data.candidates[0].content.parts[0].text);
           
           return advice;
         } catch (error) {
@@ -346,10 +338,10 @@ export class AIAnalysisService {
 
   private async testAPIKey(): Promise<boolean> {
     try {
-      const response = await fetch('https://api.openai.com/v1/models', {
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'x-goog-api-key': GEMINI_API_KEY,
         },
       });
 
