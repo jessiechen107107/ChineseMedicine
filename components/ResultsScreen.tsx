@@ -1,10 +1,11 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CONSTITUTIONS, FourExamsResult } from '@/services/FourExamsService';
 
 interface ResultsScreenProps {
   onReturnToAssessment: () => void;
-  analysisResult: any;
+  analysisResult: FourExamsResult | null;
 }
 
 export default function ResultsScreen({ onReturnToAssessment, analysisResult }: ResultsScreenProps) {
@@ -30,7 +31,48 @@ export default function ResultsScreen({ onReturnToAssessment, analysisResult }: 
 
       {/* Results Content */}
       <View style={styles.resultsContainer}>
-        
+
+        {/* Constitution profile */}
+        {analysisResult.scores?.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Your Constitution Profile:</Text>
+            <Text style={styles.primaryConstitution}>
+              {CONSTITUTIONS[analysisResult.primary].name} {CONSTITUTIONS[analysisResult.primary].zh}
+            </Text>
+            <Text style={styles.sectionSubtitle}>{CONSTITUTIONS[analysisResult.primary].summary}</Text>
+            {analysisResult.scores.map(({ key, score }) => (
+              <View key={key} style={styles.barRow}>
+                <Text style={styles.barLabel}>{CONSTITUTIONS[key].name}</Text>
+                <View style={styles.barTrack}>
+                  <View
+                    style={[
+                      styles.barFill,
+                      { width: `${Math.max(score, 2)}%`, backgroundColor: key === analysisResult.primary ? '#4ECDC4' : '#5A7F7B' },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.barValue}>{score}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Look */}
+        {!!analysisResult.observation && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Face & Tongue Observation:</Text>
+            <Text style={styles.bodyText}>{analysisResult.observation}</Text>
+          </View>
+        )}
+
+        {/* Answer to the user's question */}
+        {!!analysisResult.answerToQuestion && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>About Your Question:</Text>
+            <Text style={styles.bodyText}>{analysisResult.answerToQuestion}</Text>
+          </View>
+        )}
+
         {/* Pulse Analysis */}
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>Pulse Analysis:</Text>
@@ -94,7 +136,10 @@ export default function ResultsScreen({ onReturnToAssessment, analysisResult }: 
       {/* Footer disclaimer */}
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          The assessment results on this page are AI-generated based on your health data and are for reference only. They do not constitute a medical diagnosis or advice.
+          {analysisResult.source === 'gemini'
+            ? 'These results are AI-generated from your answers, photos and health data.'
+            : 'These results come from an on-device questionnaire analysis of your answers and health data.'}{' '}
+          They are for reference only and do not constitute a medical diagnosis or advice.
         </Text>
       </View>
     </ScrollView>
@@ -137,6 +182,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9AA6AC',
     marginBottom: 8,
+  },
+  primaryConstitution: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  barRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  barLabel: {
+    width: 110,
+    fontSize: 12,
+    color: '#C9D3D6',
+  },
+  barTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2A3B3F',
+    overflow: 'hidden',
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  barValue: {
+    width: 32,
+    textAlign: 'right',
+    fontSize: 12,
+    color: '#C9D3D6',
   },
   bodyText: {
     fontSize: 13,

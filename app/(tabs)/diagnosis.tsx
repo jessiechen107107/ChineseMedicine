@@ -1,93 +1,108 @@
 import AnalysisScreen from '@/components/AnalysisScreen';
 import ResultsScreen from '@/components/ResultsScreen';
+import { estimatePulse, INQUIRY_QUESTIONS, IntakePhoto, SMELL_OPTIONS } from '@/services/FourExamsService';
 import { HealthData, healthService } from '@/services/HealthService';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useMemo, useRef, useState } from 'react';
-import { Alert, Dimensions, Image, ImageBackground, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, ImageBackground, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width } = Dimensions.get('window');
+type PhotoTarget = 'face' | 'tongue';
+
+const MIN_ANSWERS = 4;
 
 export default function DiagnosisScreen() {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
-
-  const [facePhotoUri, setFacePhotoUri] = useState<string | null>(null);
-  const [tonguePhotoUri, setTonguePhotoUri] = useState<string | null>(null);
-  const [userInput, setUserInput] = useState<string>('');
+  const [facePhoto, setFacePhoto] = useState<IntakePhoto | null>(null);
+  const [tonguePhoto, setTonguePhoto] = useState<IntakePhoto | null>(null);
+  const [smellTags, setSmellTags] = useState<string[]>([]);
+  const [smellNote, setSmellNote] = useState('');
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [question, setQuestion] = useState('');
   const [healthData, setHealthData] = useState<HealthData | null>(null);
+  const [isReadingPulse, setIsReadingPulse] = useState(false);
 
-  const [cameraModal, setCameraModal] = useState<{ open: boolean; target: 'face' | 'tongue' | null }>({ open: false, target: null });
+  const [cameraModal, setCameraModal] = useState<{ open: boolean; target: PhotoTarget | null }>({ open: false, target: null });
   const [currentScreen, setCurrentScreen] = useState<'assessment' | 'analysis' | 'results'>('assessment');
   const [analysisResult, setAnalysisResult] = useState<any>(null);
-  
-  const canStart = useMemo(() => !!facePhotoUri && !!tonguePhotoUri && !!userInput.trim() && !!healthData, [facePhotoUri, tonguePhotoUri, userInput, healthData]);
 
-  const handleStartAssessment = () => {
-    Alert.alert(
-      'Start assessment',
-      'All set. We will use your inputs to create helpful insights.',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Start',
-          onPress: () => {
-            // Switch to analysis screen within assessment
-            setCurrentScreen('analysis');
-          }
-        }
-      ]
-    );
+  const answeredCount = Object.keys(answers).length;
+  const pulse = useMemo(() => estimatePulse(healthData), [healthData]);
+  const canStart = !!healthData && answeredCount >= MIN_ANSWERS;
+
+  const setPhoto = (target: PhotoTarget, photo: IntakePhoto) => {
+    if (target === 'face') setFacePhoto(photo);
+    else setTonguePhoto(photo);
   };
 
-  const ensureCameraPermission = async (): Promise<boolean> => {
-    if (cameraPermission?.granted) return true;
-    const res = await requestCameraPermission();
-    return !!res.granted;
-  };
-
-  const openCamera = async (target: 'face' | 'tongue') => {
-    const ok = await ensureCameraPermission();
-    if (!ok) {
+  const openCamera = async (target: PhotoTarget) => {
+    const granted = cameraPermission?.granted || (await requestCameraPermission()).granted;
+    if (!granted) {
       Alert.alert('Camera permission needed', 'Please allow camera access to take a photo.');
       return;
     }
     setCameraModal({ open: true, target });
   };
 
+  const pickFromLibrary = async (target: PhotoTarget) => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.5,
+        base64: true,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setPhoto(target, { uri: result.assets[0].uri, base64: result.assets[0].base64 });
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const choosePhotoSource = (target: PhotoTarget) => {
+    Alert.alert(target === 'face' ? 'Face photo' : 'Tongue photo', 'Use natural light and no filters.', [
+      { text: 'Take Photo', onPress: () => openCamera(target) },
+      { text: 'Choose from Library', onPress: () => pickFromLibrary(target) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const takePhoto = async () => {
     try {
-      const photo = await cameraRef.current?.takePictureAsync({ quality: 0.7, skipProcessing: true });
+      const photo = await cameraRef.current?.takePictureAsync({ quality: 0.5, base64: true });
       if (photo?.uri && cameraModal.target) {
-        if (cameraModal.target === 'face') setFacePhotoUri(photo.uri);
-        if (cameraModal.target === 'tongue') setTonguePhotoUri(photo.uri);
+        setPhoto(cameraModal.target, { uri: photo.uri, base64: photo.base64 });
         setCameraModal({ open: false, target: null });
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Failed to take photo', 'Please try again.');
     }
   };
 
+  const toggleSmell = (id: string) => {
+    setSmellTags((prev) => {
+      if (id === 'none') return prev.includes('none') ? [] : ['none'];
+      const withoutNone = prev.filter((t) => t !== 'none');
+      return withoutNone.includes(id) ? withoutNone.filter((t) => t !== id) : [...withoutNone, id];
+    });
+  };
 
-
-  const connectHealth = async () => {
+  const readPulse = async () => {
+    setIsReadingPulse(true);
     try {
-      const available = await healthService.isHealthDataAvailable();
-      if (!available) {
-        Alert.alert('Not available', 'Health data is only available on iOS with Apple Health.');
-        return;
-      }
-      await healthService.requestPermissions();
+      // Falls back to sample data when Apple Health is unavailable (e.g. simulator)
       const today = await healthService.getHealthData(new Date());
       setHealthData(today);
-    } catch (e) {
-      Alert.alert('Sync failed', 'Could not sync with Apple Watch. Please try again.');
+    } catch {
+      Alert.alert('Sync failed', 'Could not read heart data. Please try again.');
+    } finally {
+      setIsReadingPulse(false);
     }
   };
 
@@ -98,40 +113,34 @@ export default function DiagnosisScreen() {
 
   const handleReturnToAssessment = () => {
     setCurrentScreen('assessment');
-    // Reset all states for fresh assessment
-    setFacePhotoUri(null);
-    setTonguePhotoUri(null);
-    setUserInput('');
+    setFacePhoto(null);
+    setTonguePhoto(null);
+    setSmellTags([]);
+    setSmellNote('');
+    setAnswers({});
+    setQuestion('');
     setHealthData(null);
     setAnalysisResult(null);
   };
 
-  // Render different screens based on current state
+  const bottomNav = (active: number) => (
+    <View style={styles.bottomNav}>
+      {(['flower', 'musical-notes', 'person-circle'] as const).map((icon, i) => (
+        <TouchableOpacity key={icon} style={styles.navItem}>
+          <Ionicons name={icon} size={24} color={i === active ? '#4ECDC4' : '#666'} />
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+
   if (currentScreen === 'analysis') {
     return (
       <View style={styles.container}>
-        <AnalysisScreen 
-          onAnalysisComplete={handleAnalysisComplete} 
-          assessmentData={{
-            facePhotoUri,
-            tonguePhotoUri,
-            userInput,
-            healthData
-          }}
+        <AnalysisScreen
+          onAnalysisComplete={handleAnalysisComplete}
+          intake={{ facePhoto, tonguePhoto, smellTags, smellNote, answers, question, healthData }}
         />
-        
-        {/* Bottom Navigation - keep original 3 buttons */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navItem}>
-            <Ionicons name="flower" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <Ionicons name="musical-notes" size={24} color="#4ECDC4" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <Ionicons name="person-circle" size={24} color="#666" />
-          </TouchableOpacity>
-        </View>
+        {bottomNav(1)}
       </View>
     );
   }
@@ -139,40 +148,45 @@ export default function DiagnosisScreen() {
   if (currentScreen === 'results') {
     return (
       <View style={styles.container}>
-        <ResultsScreen 
-          onReturnToAssessment={handleReturnToAssessment} 
-          analysisResult={analysisResult}
-        />
-        
-        {/* Bottom Navigation - keep original 3 buttons */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navItem}>
-            <Ionicons name="flower" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <Ionicons name="musical-notes" size={24} color="#4ECDC4" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <Ionicons name="person-circle" size={24} color="#666" />
-          </TouchableOpacity>
-        </View>
+        <ResultsScreen onReturnToAssessment={handleReturnToAssessment} analysisResult={analysisResult} />
+        {bottomNav(1)}
       </View>
     );
   }
 
+  const renderPhotoTile = (target: PhotoTarget, photo: IntakePhoto | null, label: string) => (
+    <TouchableOpacity style={styles.photoTile} onPress={() => choosePhotoSource(target)} activeOpacity={0.8}>
+      {photo ? (
+        <Image source={{ uri: photo.uri }} style={styles.photoPreview} />
+      ) : (
+        <Ionicons name="camera-outline" size={28} color="#9EDAD6" />
+      )}
+      <Text style={styles.photoLabel}>{photo ? `${label} ✓` : label}</Text>
+    </TouchableOpacity>
+  );
+
+  const sectionHeader = (image: any, color: string, title: string, subtitle: string, done: boolean) => (
+    <View style={styles.sectionHeaderRow}>
+      <View style={[styles.stepIcon, { backgroundColor: color }]}>
+        <Image source={image} style={styles.observationImage} resizeMode="cover" />
+      </View>
+      <View style={styles.stepContent}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        <Text style={styles.stepDescription}>{subtitle}</Text>
+      </View>
+      <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={done ? '#4ECDC4' : '#5A6B6F'} />
+    </View>
+  );
+
   return (
     <View style={styles.container}>
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={[
-          styles.scrollViewContent,
-          { paddingBottom: insets.bottom + 20 }
-        ]}
+        contentContainerStyle={[styles.scrollViewContent, { paddingBottom: insets.bottom + 20 }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* Header - hero only, no top start button */}
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-        </View>
+        <View style={[styles.header, { paddingTop: insets.top + 20 }]} />
 
         {/* Main TCM Card */}
         <View style={styles.mainCard}>
@@ -181,17 +195,11 @@ export default function DiagnosisScreen() {
             style={styles.gradientCard}
             imageStyle={styles.backgroundImage}
           >
-            {/* Overlay for better text readability */}
             <View style={styles.overlay} />
-            
             <View style={styles.cardContent}>
-              <Text style={styles.mainTitle}>Chinese Medicine</Text>
-              <Text style={styles.mainSubtitle}>
-              Sometimes the best medicine is to nourish, not to fight.
-              </Text>
+              <Text style={styles.mainTitle}>Four Examinations</Text>
+              <Text style={styles.mainSubtitle}>Look · Listen · Ask · Feel. A gentle TCM check-in, the way a practitioner would.</Text>
             </View>
-            
-            {/* Decorative elements */}
             <View style={styles.decorativeElements}>
               <Ionicons name="leaf" size={40} color="rgba(255,255,255,0.2)" style={styles.leaf1} />
               <Ionicons name="flower" size={30} color="rgba(255,255,255,0.15)" style={styles.leaf2} />
@@ -200,141 +208,141 @@ export default function DiagnosisScreen() {
           </ImageBackground>
         </View>
 
-        {/* Steps */}
         <View style={styles.stepsContainer}>
-          {/* Look */}
-          <TouchableOpacity style={styles.stepCard} activeOpacity={0.7} onPress={() => openCamera('face')}>
-            <View style={[styles.stepIcon, { backgroundColor: '#4ECDC4' }]}>
-              <Image 
-                source={require('@/assets/images/ChatGPT Image 2025年8月8日 下午01_03_41.png')}
-                style={styles.observationImage}
-                resizeMode="cover"
-              />
-            </View>
-            <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>Look</Text>
-              <Text style={styles.stepDescription}>Tap and take a front-face photo.</Text>
-            </View>
-            <View style={styles.stepStatus}>
-              <TouchableOpacity style={styles.actionButton} onPress={() => openCamera('face')}>
-                {facePhotoUri ? (
-                  <Ionicons name="checkmark" size={28} color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="camera" size={28} color="#FFFFFF" />
-                )}
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-
-          {/* Listen (tongue) */}
-          <TouchableOpacity style={styles.stepCard} activeOpacity={0.7} onPress={() => openCamera('tongue')}>
-            <View style={[styles.stepIcon, { backgroundColor: '#45B7D1' }]}>
-              <Image 
-                source={require('@/assets/images/ChatGPT Image 2025年8月8日 下午01_12_29.png')}
-                style={styles.observationImage}
-                resizeMode="cover"
-              />
-            </View>
-            <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>Listen</Text>
-              <Text style={styles.stepDescription}>Tap and take a clear tongue photo.</Text>
-            </View>
-            <View style={styles.stepStatus}>
-              <TouchableOpacity style={styles.actionButton} onPress={() => openCamera('tongue')}>
-                {tonguePhotoUri ? (
-                  <Ionicons name="checkmark" size={28} color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="camera" size={28} color="#FFFFFF" />
-                )}
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-
-          {/* Ask (text input) */}
-          <View style={styles.stepCard}>
-            <View style={[styles.stepIcon, { backgroundColor: '#96CEB4' }]}>
-              <Image 
-                source={require('@/assets/images/ChatGPT Image 2025年8月8日 下午02_00_53.png')}
-                style={styles.observationImage}
-                resizeMode="cover"
-              />
-            </View>
-            <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>Ask</Text>
-              <Text style={styles.stepDescription}>Describe how you feel or what you want to improve.</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Type your concerns or questions here..."
-                placeholderTextColor="#999"
-                value={userInput}
-                onChangeText={setUserInput}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-              {!!userInput.trim() && <Text style={styles.smallHint}>Input saved</Text>}
-            </View>
-            <View style={styles.stepStatus}>
-              <View style={styles.actionButton}>
-                {userInput.trim() ? (
-                  <Ionicons name="checkmark" size={28} color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="create-outline" size={28} color="#FFFFFF" />
-                )}
-              </View>
+          {/* Look (望) */}
+          <View style={styles.sectionCard}>
+            {sectionHeader(
+              require('@/assets/images/ChatGPT Image 2025年8月8日 下午01_03_41.png'),
+              '#4ECDC4',
+              'Look (望)',
+              'Face and tongue photos. Take one or upload from your library.',
+              !!facePhoto || !!tonguePhoto
+            )}
+            <View style={styles.photoRow}>
+              {renderPhotoTile('face', facePhoto, 'Face')}
+              {renderPhotoTile('tongue', tonguePhoto, 'Tongue')}
             </View>
           </View>
 
-          {/* Check (Apple Watch / Health) */}
-          <TouchableOpacity style={styles.stepCard} activeOpacity={0.7} onPress={connectHealth}>
-            <View style={[styles.stepIcon, { backgroundColor: '#FFEAA7' }]}>
-              <Image 
-                source={require('@/assets/images/ChatGPT Image 2025年8月8日 下午02_23_35.png')}
-                style={styles.observationImage}
-                resizeMode="cover"
-              />
+          {/* Listen & Smell (聞) */}
+          <View style={styles.sectionCard}>
+            {sectionHeader(
+              require('@/assets/images/ChatGPT Image 2025年8月8日 下午01_12_29.png'),
+              '#45B7D1',
+              'Listen & Smell (聞)',
+              'Have you noticed any body odors lately?',
+              smellTags.length > 0 || !!smellNote.trim()
+            )}
+            <View style={styles.chipRow}>
+              {SMELL_OPTIONS.map((o) => (
+                <TouchableOpacity
+                  key={o.id}
+                  style={[styles.chip, smellTags.includes(o.id) && styles.chipSelected]}
+                  onPress={() => toggleSmell(o.id)}
+                >
+                  <Text style={[styles.chipText, smellTags.includes(o.id) && styles.chipTextSelected]}>{o.label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>Check</Text>
-              <Text style={styles.stepDescription}>Sync Apple Watch to fetch current pulse and variability.</Text>
-              {healthData ? (
-                <View>
-                  <Text style={styles.metricText}>Heart rate: {healthData.heartRate} bpm</Text>
-                  <Text style={styles.metricText}>HRV: {healthData.heartRateVariability} ms</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Anything else? e.g. voice feels weak, coughing"
+              placeholderTextColor="#999"
+              value={smellNote}
+              onChangeText={setSmellNote}
+              multiline
+            />
+          </View>
+
+          {/* Ask (問) */}
+          <View style={styles.sectionCard}>
+            {sectionHeader(
+              require('@/assets/images/ChatGPT Image 2025年8月8日 下午02_00_53.png'),
+              '#96CEB4',
+              'Ask (問)',
+              `Answer at least ${MIN_ANSWERS} questions (${answeredCount}/${INQUIRY_QUESTIONS.length}).`,
+              answeredCount >= MIN_ANSWERS
+            )}
+            {INQUIRY_QUESTIONS.map((q) => (
+              <View key={q.id} style={styles.questionBlock}>
+                <Text style={styles.questionText}>{q.question}</Text>
+                <View style={styles.chipRow}>
+                  {q.options.map((o) => {
+                    const selected = answers[q.id] === o.id;
+                    return (
+                      <TouchableOpacity
+                        key={o.id}
+                        style={[styles.chip, selected && styles.chipSelected]}
+                        onPress={() => setAnswers((prev) => ({ ...prev, [q.id]: o.id }))}
+                      >
+                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{o.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-              ) : null}
-            </View>
-            <View style={styles.stepStatus}>
-              <TouchableOpacity style={styles.actionButton} onPress={connectHealth}>
-                {healthData ? (
-                  <Ionicons name="checkmark" size={28} color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="watch" size={28} color="#FFFFFF" />
-                )}
+              </View>
+            ))}
+            <Text style={styles.questionText}>What would you like to ask?</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="e.g. Why do I feel tired after lunch?"
+              placeholderTextColor="#999"
+              value={question}
+              onChangeText={setQuestion}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+          </View>
+
+          {/* Feel the pulse (切) */}
+          <View style={styles.sectionCard}>
+            {sectionHeader(
+              require('@/assets/images/ChatGPT Image 2025年8月8日 下午02_23_35.png'),
+              '#FFEAA7',
+              'Feel (切)',
+              'Estimate your pulse from Apple Watch heart rate and HRV.',
+              !!healthData
+            )}
+            {healthData ? (
+              <View style={styles.pulseBox}>
+                <Text style={styles.metricText}>
+                  Heart rate {healthData.heartRate} bpm · HRV {healthData.heartRateVariability} ms
+                  {healthData.source === 'demo' ? ' (sample data)' : ''}
+                </Text>
+                {pulse && <Text style={styles.pulseLabel}>{pulse.label}</Text>}
+                {pulse && <Text style={styles.stepDescription}>{pulse.description}</Text>}
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.syncButton} onPress={readPulse} disabled={isReadingPulse}>
+                <Ionicons name="watch-outline" size={18} color="#1E2B2F" />
+                <Text style={styles.syncButtonText}>{isReadingPulse ? 'Reading…' : 'Read from Apple Watch'}</Text>
               </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
+            )}
+          </View>
         </View>
 
-        {/* Start button after steps */}
         <View style={{ marginTop: 6, marginBottom: 16, alignItems: 'center' }}>
           <TouchableOpacity
             style={[styles.startButton, { opacity: canStart ? 1 : 0.5 }]}
             disabled={!canStart}
-            onPress={handleStartAssessment}
+            onPress={() => setCurrentScreen('analysis')}
           >
             <Ionicons name="play" size={14} color="#1E2B2F" />
             <Text style={styles.startButtonText}>start assessment</Text>
           </TouchableOpacity>
+          {!canStart && (
+            <Text style={styles.smallHint}>
+              {!healthData ? 'Read your pulse and ' : ''}answer {Math.max(MIN_ANSWERS - answeredCount, 0)} more question(s) to start.
+            </Text>
+          )}
         </View>
 
-        {/* Footer disclaimer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>For reference only. Not medical advice.</Text>
         </View>
       </ScrollView>
 
-      {/* Camera modal (camera only, no gallery) */}
       <Modal visible={cameraModal.open} animationType="slide" onRequestClose={() => setCameraModal({ open: false, target: null })}>
         <View style={styles.cameraContainer}>
           <View style={styles.cameraHeader}>
@@ -354,18 +362,7 @@ export default function DiagnosisScreen() {
         </View>
       </Modal>
 
-      {/* Bottom Navigation Placeholder */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="flower" size={24} color="#4ECDC4" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="musical-notes" size={24} color="#666" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="person-circle" size={24} color="#666" />
-        </TouchableOpacity>
-      </View>
+      {bottomNav(0)}
     </View>
   );
 }
@@ -633,5 +630,98 @@ const styles = StyleSheet.create({
     right: 24,
     top: -36,
     padding: 6,
+  },
+  sectionCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    padding: 12,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  photoTile: {
+    flex: 1,
+    height: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3A4B4F',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  photoPreview: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  photoLabel: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 6,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: '#4A5B5F',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  chipSelected: {
+    backgroundColor: '#4ECDC4',
+    borderColor: '#4ECDC4',
+  },
+  chipText: {
+    color: '#D0D8DA',
+    fontSize: 13,
+  },
+  chipTextSelected: {
+    color: '#1E2B2F',
+    fontWeight: '600',
+  },
+  questionBlock: {
+    marginBottom: 12,
+  },
+  questionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  pulseBox: {
+    gap: 4,
+  },
+  pulseLabel: {
+    color: '#FFEAA7',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFEAA7',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  syncButtonText: {
+    color: '#1E2B2F',
+    fontWeight: '600',
   },
 }); 
