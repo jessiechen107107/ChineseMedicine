@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import type { ComprehensiveAnalysis, PersonalizedAdvice } from '@/services/AIAnalysisService';
 import { aiAnalysisService } from '@/services/AIAnalysisService';
+import { authService } from '@/services/AuthService';
 import { getHRVAndHeartRate, HealthData, healthService } from '@/services/HealthService';
 import { TCMWeatherAnalysis, WeatherData, weatherIntegrationService } from '@/services/WeatherIntegrationService';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -115,6 +116,9 @@ export default function HealthOverviewScreen() {
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
+    authService.getCurrentUser().then((user) => {
+      if (user) setUserName(user.name);
+    });
     loadHealthOverviewData();
     // 讀取最近的 HR 與 HRV 作為示範（全域共用函式）
     getHRVAndHeartRate(24)
@@ -377,7 +381,10 @@ export default function HealthOverviewScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Edit Name', onPress: () => {
           Alert.prompt('Edit Name', 'Enter your name:', (text) => {
-            if (text) setUserName(text);
+            if (text) {
+              setUserName(text);
+              authService.updateName(text);
+            }
           });
         }},
         { text: 'Edit Location', onPress: () => {
