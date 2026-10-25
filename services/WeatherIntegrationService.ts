@@ -25,7 +25,7 @@ export interface WeatherData {
     description: string;       // 詳細描述
   };
   timestamp: string;
-  source: 'system_weather' | 'api_fallback';
+  source: 'system_weather' | 'api_fallback' | 'open_meteo';
 }
 
 export interface TCMWeatherAnalysis {
@@ -84,52 +84,121 @@ class WeatherIntegrationService {
           city: address?.city || 'Unknown',
           country: address?.country || 'Unknown',
         },
-        current: weatherData,
+        current: weatherData.current,
         timestamp: new Date().toISOString(),
-        source: this.apiKey ? 'api_fallback' : 'system_weather'
+        source: weatherData.source,
       };
 
     } catch (error) {
       console.error('Failed to get weather data:', error);
-      return this.getFallbackWeatherData();
+      // Without location access, show live weather for a default city (Taipei)
+      try {
+        return {
+          location: { latitude: 25.033, longitude: 121.5654, city: 'Taipei', country: 'Taiwan' },
+          current: await this.fetchOpenMeteo(25.033, 121.5654),
+          timestamp: new Date().toISOString(),
+          source: 'open_meteo',
+        };
+      } catch {
+        return this.getFallbackWeatherData();
+      }
     }
   }
 
   /**
    * 從天氣API獲取數據 (OpenWeatherMap 或類似服務)
    */
-  private async fetchWeatherData(lat: number, lon: number) {
-    if (!this.apiKey) {
-      return this.getSystemWeatherData(lat, lon);
-    }
-
-    try {
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric`
-      );
-      
-      if (!response.ok) {
-        throw new Error('Weather API request failed');
+  private async fetchWeatherData(lat: number, lon: number): Promise<{ current: WeatherData['current']; source: WeatherData['source'] }> {
+    if (this.apiKey) {
+      try {
+        return { current: await this.fetchOpenWeatherMap(lat, lon), source: 'api_fallback' };
+      } catch (error) {
+        console.error('OpenWeatherMap error:', error);
       }
-
-      const data = await response.json();
-      
-      return {
-        temperature: Math.round(data.main.temp),
-        humidity: data.main.humidity,
-        pressure: data.main.pressure,
-        windSpeed: Math.round(data.wind.speed * 3.6), // m/s to km/h
-        windDirection: this.getWindDirection(data.wind.deg),
-        uvIndex: 5, // 需要額外API調用
-        visibility: data.visibility / 1000, // m to km
-        cloudCover: data.clouds.all,
-        weatherCondition: data.weather[0].main,
-        description: data.weather[0].description,
-      };
-    } catch (error) {
-      console.error('Weather API error:', error);
-      return this.getSystemWeatherData(lat, lon);
     }
+
+    // Open-Meteo is free and needs no API key
+    try {
+      return { current: await this.fetchOpenMeteo(lat, lon), source: 'open_meteo' };
+    } catch (error) {
+      console.error('Open-Meteo error:', error);
+      return { current: this.getSystemWeatherData(lat, lon), source: 'system_weather' };
+    }
+  }
+
+  private async fetchOpenWeatherMap(lat: number, lon: number): Promise<WeatherData['current']> {
+    const response = await fetch(
+      `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric`
+    );
+
+    if (!response.ok) {
+      throw new Error('Weather API request failed');
+    }
+
+    const data = await response.json();
+
+    return {
+      temperature: Math.round(data.main.temp),
+      humidity: data.main.humidity,
+      pressure: data.main.pressure,
+      windSpeed: Math.round(data.wind.speed * 3.6), // m/s to km/h
+      windDirection: this.getWindDirection(data.wind.deg),
+      uvIndex: 5, // needs a separate API call
+      visibility: data.visibility / 1000, // m to km
+      cloudCover: data.clouds.all,
+      weatherCondition: data.weather[0].main,
+      description: data.weather[0].description,
+    };
+  }
+
+  private async fetchOpenMeteo(lat: number, lon: number): Promise<WeatherData['current']> {
+    const params = [
+      'temperature_2m',
+      'relative_humidity_2m',
+      'surface_pressure',
+      'wind_speed_10m',
+      'wind_direction_10m',
+      'cloud_cover',
+      'weather_code',
+      'uv_index',
+      'visibility',
+    ].join(',');
+    const response = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${params}&timezone=auto`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Open-Meteo request failed: ${response.status}`);
+    }
+
+    const { current } = await response.json();
+    const { condition, description } = this.describeWeatherCode(current.weather_code);
+
+    return {
+      temperature: Math.round(current.temperature_2m),
+      humidity: Math.round(current.relative_humidity_2m),
+      pressure: Math.round(current.surface_pressure),
+      windSpeed: Math.round(current.wind_speed_10m), // already km/h
+      windDirection: this.getWindDirection(current.wind_direction_10m),
+      uvIndex: Math.round(current.uv_index ?? 0),
+      visibility: current.visibility != null ? Math.round(current.visibility / 1000) : 10,
+      cloudCover: Math.round(current.cloud_cover),
+      weatherCondition: condition,
+      description,
+    };
+  }
+
+  // Map WMO weather codes to conditions
+  private describeWeatherCode(code: number): { condition: string; description: string } {
+    if (code === 0) return { condition: 'Clear', description: 'clear sky' };
+    if (code <= 3) return { condition: 'Clouds', description: code === 3 ? 'overcast' : 'partly cloudy' };
+    if (code <= 48) return { condition: 'Fog', description: 'fog' };
+    if (code <= 57) return { condition: 'Drizzle', description: 'drizzle' };
+    if (code <= 67) return { condition: 'Rain', description: 'rain' };
+    if (code <= 77) return { condition: 'Snow', description: 'snow' };
+    if (code <= 82) return { condition: 'Rain', description: 'rain showers' };
+    if (code <= 86) return { condition: 'Snow', description: 'snow showers' };
+    return { condition: 'Thunderstorm', description: 'thunderstorm' };
   }
 
   /**
@@ -276,7 +345,7 @@ class WeatherIntegrationService {
     const { current } = weather;
 
     // 基於主要邪氣的建議
-    const maxFactor = Math.max(...Object.values(factors));
+    const maxFactor = Math.max(...(Object.values(factors) as number[]));
     const dominantFactor = Object.keys(factors).find(
       key => factors[key] === maxFactor
     );
@@ -365,7 +434,7 @@ class WeatherIntegrationService {
   }
 
   private getSeasonalFactor(season: string): number {
-    const seasonFactors = { spring: 75, summer: 85, autumn: 70, winter: 80 };
+    const seasonFactors: Record<string, number> = { spring: 75, summer: 85, autumn: 70, winter: 80 };
     return seasonFactors[season] || 75;
   }
 
@@ -381,7 +450,7 @@ class WeatherIntegrationService {
   }
 
   private getSeasonalWeatherCondition(season: string): string {
-    const conditions = {
+    const conditions: Record<string, string> = {
       spring: 'Clear',
       summer: 'Partly Cloudy', 
       autumn: 'Clear',

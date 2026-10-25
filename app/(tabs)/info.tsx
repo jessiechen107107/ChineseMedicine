@@ -171,7 +171,14 @@ export default function InfoScreen() {
       <View style={[styles.fixedHeader, { paddingTop: Math.max(insets.top + 20, 80) }]}>
           <View style={styles.headerContainer}>
             <View style={styles.currentDateDisplay}>
-              <ThemedText style={styles.currentMonthDay}>{formatMonthDay(selectedDate)}</ThemedText>
+              <View style={styles.dateWithBadge}>
+                <ThemedText style={styles.currentMonthDay}>{formatMonthDay(selectedDate)}</ThemedText>
+                {healthData && (
+                  <ThemedText style={styles.dataSourceBadge}>
+                    {healthData.source === 'healthkit' ? 'Apple Health' : 'Sample data'}
+                  </ThemedText>
+                )}
+              </View>
             <View style={styles.headerActions}>
               {isHealthConnected && (
                 <>
@@ -562,6 +569,20 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#8ac8cf',
     marginTop: 8,
+  },
+  dateWithBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dataSourceBadge: {
+    fontSize: 11,
+    color: '#1E2B2F',
+    backgroundColor: '#C9D8D2',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+    overflow: 'hidden',
+    marginLeft: 8,
   },
   headerActions: {
     flexDirection: 'row',

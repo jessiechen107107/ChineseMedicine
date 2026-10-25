@@ -17,6 +17,8 @@ export interface HealthData {
   averageCycleLength: number;
   periodDuration: number;
   lastPeriodDate: string;
+  // 'healthkit': at least some values come from Apple Health; 'demo': all values are sample data
+  source?: 'healthkit' | 'demo';
 }
 
 export interface HealthPermissions {
@@ -42,7 +44,7 @@ class HealthService {
     cycleTracking: false,
   };
 
-  private readonly HEALTH_DATA_KEY = '@health_data';
+  private readonly HEALTH_DATA_KEY = '@health_data_v2';
   private readonly HEALTH_SYNC_KEY = '@health_sync_enabled';
   private hasRequestedNativePermissions: boolean = false;
 
@@ -74,7 +76,8 @@ class HealthService {
               AppleHealthKit.Constants.Permissions.HeartRateVariability,
               AppleHealthKit.Constants.Permissions.Steps,
               AppleHealthKit.Constants.Permissions.SleepAnalysis,
-              AppleHealthKit.Constants.Permissions.BloodOxygen,
+              AppleHealthKit.Constants.Permissions.OxygenSaturation,
+              AppleHealthKit.Constants.Permissions.RestingHeartRate,
             ],
             write: [],
           },
@@ -213,10 +216,12 @@ class HealthService {
   private generateHealthDataForDate(date: Date): HealthData {
     const dateString = date.toISOString().split('T')[0];
     
-    // 使用日期作為種子來生成一致的數據
-    const seed = date.getTime();
+    // Seed by date for stable data; each field gets its own seed so values don't move in lockstep
+    const seed = Math.floor(date.getTime() / 86400000);
+    let call = 0;
     const random = (min: number, max: number) => {
-      const x = Math.sin(seed) * 10000;
+      call += 1;
+      const x = Math.sin(seed * 12.9898 + call * 78.233) * 43758.5453;
       return Math.floor((x - Math.floor(x)) * (max - min + 1)) + min;
     };
 
@@ -235,7 +240,80 @@ class HealthService {
       averageCycleLength: random(18, 45), // Expanded range: 18-45 days for irregular cycles
       periodDuration: random(2, 10), // Expanded range: 2-10 days for irregular periods
       lastPeriodDate: this.getLastPeriodDate(date),
+      source: 'demo',
     };
+  }
+
+  // Promise wrapper for the HealthKit callback API
+  private hkCall<T>(fn: (options: any, cb: (err: string, results: T) => void) => void, options: any): Promise<T | null> {
+    return new Promise((resolve) => {
+      try {
+        fn(options, (err, results) => resolve(err ? null : results));
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  // Read real Apple Health data for a day; fields with no samples are omitted
+  private async readHealthKitDay(date: Date): Promise<Partial<HealthData>> {
+    if (Platform.OS !== 'ios' || !this.hasRequestedNativePermissions) return {};
+
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    const range = { startDate: start.toISOString(), endDate: end.toISOString() };
+    // Count sleep from 18:00 the previous evening to 12:00 on the day
+    const sleepStart = new Date(start.getTime() - 6 * 3600000);
+    const sleepEnd = new Date(start.getTime() + 12 * 3600000);
+
+    const avg = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
+    const HK = AppleHealthKit as any;
+
+    const [steps, hr, hrv, rhr, spo2, sleep] = await Promise.all([
+      this.hkCall<HealthValue>(HK.getStepCount, { date: start.toISOString(), includeManuallyAdded: true }),
+      this.hkCall<HealthValue[]>(HK.getHeartRateSamples, { ...range, limit: 1000 }),
+      this.hkCall<HealthValue[]>(HK.getHeartRateVariabilitySamples, { ...range, limit: 1000 }),
+      this.hkCall<HealthValue[]>(HK.getRestingHeartRateSamples, { ...range, limit: 10 }),
+      this.hkCall<HealthValue[]>(HK.getOxygenSaturationSamples, { ...range, limit: 1000 }),
+      this.hkCall<any[]>(HK.getSleepSamples, { startDate: sleepStart.toISOString(), endDate: sleepEnd.toISOString(), limit: 1000 }),
+    ]);
+
+    const result: Partial<HealthData> = {};
+
+    if (steps && Number(steps.value) > 0) result.steps = Math.round(Number(steps.value));
+
+    const hrAvg = avg((hr || []).map((s) => Number(s.value)));
+    if (hrAvg) result.heartRate = Math.round(hrAvg);
+
+    // HRV (SDNN) defaults to seconds; convert to ms
+    const hrvAvg = avg((hrv || []).map((s) => {
+      const v = Number(s.value);
+      return v < 1 ? v * 1000 : v;
+    }));
+    if (hrvAvg) {
+      result.heartRateVariability = Math.round(hrvAvg);
+      result.averageHRV = Math.round(hrvAvg);
+    }
+
+    const rhrAvg = avg((rhr || []).map((s) => Number(s.value)));
+    if (rhrAvg) result.averageRHR = Math.round(rhrAvg);
+
+    // SpO2 may come back as a 0-1 fraction
+    const spo2Avg = avg((spo2 || []).map((s) => {
+      const v = Number(s.value);
+      return v <= 1 ? v * 100 : v;
+    }));
+    if (spo2Avg) result.bloodOxygen = Math.round(spo2Avg);
+
+    // Only count asleep stages (ASLEEP on older devices, CORE/DEEP/REM on newer ones)
+    const asleepMs = (sleep || [])
+      .filter((s) => ['ASLEEP', 'CORE', 'DEEP', 'REM'].includes(String(s.value).toUpperCase()))
+      .reduce((sum, s) => sum + (new Date(s.endDate).getTime() - new Date(s.startDate).getTime()), 0);
+    if (asleepMs > 0) result.sleepDuration = Math.round((asleepMs / 3600000) * 10) / 10;
+
+    return result;
   }
 
   // 獲取健康數據
@@ -252,6 +330,18 @@ class HealthService {
       }
 
       const dateString = date.toISOString().split('T')[0];
+
+      // Prefer real Apple Health data and fill missing fields with sample data
+      const real = await this.readHealthKitDay(date);
+      if (Object.keys(real).length > 0) {
+        return {
+          ...this.generateHealthDataForDate(date),
+          ...real,
+          lastSyncTime: new Date(),
+          source: 'healthkit',
+        };
+      }
+
       const storedData = await AsyncStorage.getItem(this.HEALTH_DATA_KEY);
       
       if (storedData) {
