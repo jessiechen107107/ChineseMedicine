@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// 本機帳號系統：帳號只存在這支手機上，不需要任何後端，也不會因為閒置而被停用。
-// 注意：這是展示用的本機登入，密碼只做簡單雜湊，不是正式的安全機制。
+// Local account system: accounts live only on this device, so there is no backend
+// that can be paused or expire. Demo-grade only: passwords get a simple hash, not real security.
 
 export interface LocalUser {
   name: string;
@@ -22,7 +22,7 @@ export const DEMO_USER: LocalUser = {
   createdAt: new Date(0).toISOString(),
 };
 
-// FNV-1a，避免把明碼密碼直接寫進 AsyncStorage
+// FNV-1a, so plain-text passwords are never written to AsyncStorage
 const hashPassword = (password: string): string => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < password.length; i++) {

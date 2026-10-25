@@ -7,7 +7,7 @@ export default function IndexScreen() {
   const router = useRouter();
 
   useEffect(() => {
-    // 已登入就直接進 App，否則到歡迎頁
+    // Go straight to the app when signed in, otherwise show the welcome screen
     authService.getCurrentUser().then((user) => {
       router.replace(user ? '/(tabs)' : '/welcome');
     });
