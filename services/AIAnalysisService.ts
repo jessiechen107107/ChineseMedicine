@@ -1,9 +1,5 @@
+import { askClaude, isClaudeConfigured } from './ClaudeService';
 import { HealthData } from './HealthService';
-
-// 請設置環境變量 EXPO_PUBLIC_GEMINI_API_KEY (取得: https://aistudio.google.com/apikey)
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const GEMINI_MODEL = 'gemini-flash-latest';
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export interface ConstitutionAnalysis {
   tendency: string;
@@ -101,52 +97,18 @@ export class AIAnalysisService {
     location: string = 'Taiwan'
   ): Promise<ConstitutionAnalysis> {
     try {
-      // First, validate the API key format
-      if (!GEMINI_API_KEY) {
-        console.error('Missing Gemini API key');
-        return this.getFallbackAnalysis(healthData);
-      }
-
-      // Test API key with a simple request first
-      const testResponse = await this.testAPIKey();
-      if (!testResponse) {
-        console.error('API key validation failed');
+      if (!isClaudeConfigured()) {
         return this.getFallbackAnalysis(healthData);
       }
 
       const prompt = this.buildConstitutionPrompt(healthData, assessmentData, location);
 
-      const requestBody = {
-        systemInstruction: {
-          parts: [{ text: 'You are a Traditional Chinese Medicine (TCM) expert specializing in constitutional analysis. Provide accurate, professional analysis based on the given health data and environmental factors.' }]
-        },
-        contents: [
-          { role: 'user', parts: [{ text: prompt }] }
-        ],
-        generationConfig: {
-          maxOutputTokens: 800,
-          temperature: 0.7,
-        },
-      };
-
-      const response = await fetch(GEMINI_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': GEMINI_API_KEY,
-        },
-        body: JSON.stringify(requestBody),
+      const text = await askClaude({
+        system: 'You are a Traditional Chinese Medicine (TCM) expert specializing in constitutional analysis. Provide accurate, professional analysis based on the given health data and environmental factors.',
+        prompt,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('API Error Response:', errorText);
-        throw new Error(`API request failed: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-
-      const analysis = this.parseAIResponse(data.candidates[0].content.parts[0].text);
+      const analysis = this.parseAIResponse(text);
 
       return analysis;
     } catch (error) {
@@ -163,38 +125,18 @@ export class AIAnalysisService {
     externalPathogensData?: any
   ): Promise<ComprehensiveAnalysis> {
     try {
-      // First, validate the API key format
-      if (!GEMINI_API_KEY) {
-        console.error('Missing Gemini API key');
-        return this.getFallbackComprehensiveAnalysis(healthData);
-      }
-
-      // Test API key with a simple request first
-      const testResponse = await this.testAPIKey();
-      if (!testResponse) {
-        console.error('API key validation failed');
+      if (!isClaudeConfigured()) {
         return this.getFallbackComprehensiveAnalysis(healthData);
       }
 
       const prompt = this.buildComprehensivePrompt(healthData, assessmentData, location, externalPathogensData);
 
-      const requestBody = {
-        systemInstruction: {
-          parts: [{ text: 'You are a comprehensive Traditional Chinese Medicine (TCM) expert. Analyze health data and provide detailed insights on wellness advice, constitutional tendencies, external pathogenic factors, and organ imbalances. Consider environmental and climate factors in your analysis.' }]
-        },
-        contents: [
-          { role: 'user', parts: [{ text: prompt }] }
-        ],
-        // Keep token budget modest to avoid transport failures on some mobile networks
-        generationConfig: {
-          maxOutputTokens: 1000,
-          temperature: 0.7,
-        },
-      };
+      const text = await askClaude({
+        system: 'You are a comprehensive Traditional Chinese Medicine (TCM) expert. Analyze health data and provide detailed insights on wellness advice, constitutional tendencies, external pathogenic factors, and organ imbalances. Consider environmental and climate factors in your analysis.',
+        prompt,
+      });
 
-      const data = await this.postChatCompletionWithRetry(requestBody, 'comprehensive');
-
-      const analysis = this.parseComprehensiveResponse(data.candidates[0].content.parts[0].text);
+      const analysis = this.parseComprehensiveResponse(text);
 
       return analysis;
     } catch (error) {
@@ -204,157 +146,29 @@ export class AIAnalysisService {
     }
   }
 
-  /**
-   * Helper: resilient POST to Gemini with timeout and retries.
-   */
-  private async postChatCompletionWithRetry(body: any, label: string) {
-    let lastErr: any = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
-
-        const response = await fetch(GEMINI_API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'x-goog-api-key': GEMINI_API_KEY,
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`[${label}] API Error Response (${response.status}):`, errorText);
-          // Retry on 5xx server errors
-          if (response.status >= 500 && attempt < 3) {
-            await new Promise(r => setTimeout(r, attempt * 1500));
-            continue;
-          }
-          throw new Error(`${label} API request failed: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        return data;
-      } catch (err) {
-        lastErr = err;
-        console.error(`[${label}] request attempt ${attempt} failed:`, err);
-        // Retry on network failures/aborts
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, attempt * 1500));
-          continue;
-        }
-      }
-    }
-    throw lastErr ?? new Error('Unknown network error');
-  }
-
   async analyzePersonalizedAdvice(
     healthData: HealthData,
     assessmentData?: AssessmentData,
     location: string = 'Taiwan'
   ): Promise<PersonalizedAdvice> {
     try {
-      // First, validate the API key format
-      if (!GEMINI_API_KEY) {
-        console.error('Missing Gemini API key');
-        return this.getFallbackPersonalizedAdvice(healthData);
-      }
-
-      // Test API key with a simple request first
-      const testResponse = await this.testAPIKey();
-      if (!testResponse) {
-        console.error('API key validation failed');
+      if (!isClaudeConfigured()) {
         return this.getFallbackPersonalizedAdvice(healthData);
       }
 
       const prompt = this.buildPersonalizedAdvicePrompt(healthData, assessmentData, location);
 
-      const requestBody = {
-        systemInstruction: {
-          parts: [{ text: 'You are a Traditional Chinese Medicine (TCM) wellness expert specializing in personalized lifestyle advice. Analyze health data, assessment records, and environmental factors to provide specific recommendations for diet, sleep, emotions, exercise, and acupressure therapy.' }]
-        },
-        contents: [
-          { role: 'user', parts: [{ text: prompt }] }
-        ],
-        generationConfig: {
-          maxOutputTokens: 1000,
-          temperature: 0.7,
-        },
-      };
+      // The SDK already retries rate limits, 5xx errors and network failures
+      const text = await askClaude({
+        system: 'You are a Traditional Chinese Medicine (TCM) wellness expert specializing in personalized lifestyle advice. Analyze health data, assessment records, and environmental factors to provide specific recommendations for diet, sleep, emotions, exercise, and acupressure therapy.',
+        prompt,
+      });
 
-      // 重試機制：最多嘗試3次
-      let lastError: Error | null = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const response = await fetch(GEMINI_API_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-goog-api-key': GEMINI_API_KEY,
-            },
-            body: JSON.stringify(requestBody),
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`Attempt ${attempt} - API Error Response:`, errorText);
-
-            // 如果是5xx錯誤，嘗試重試
-            if (response.status >= 500 && attempt < 3) {
-              await new Promise(resolve => setTimeout(resolve, attempt * 2000));
-              continue;
-            }
-
-            throw new Error(`Personalized Advice API request failed: ${response.status} - ${errorText}`);
-          }
-
-          const data = await response.json();
-
-          const advice = this.parsePersonalizedAdviceResponse(data.candidates[0].content.parts[0].text);
-          
-          return advice;
-        } catch (error) {
-          lastError = error as Error;
-          if (attempt < 3) {
-            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
-          }
-        }
-      }
-      
-      // 如果所有重試都失敗，拋出最後的錯誤
-      throw lastError;
-      
+      return this.parsePersonalizedAdviceResponse(text);
     } catch (error) {
       console.error('Error in personalized advice analysis:', error);
       // Fallback to basic analysis if API fails
       return this.getFallbackPersonalizedAdvice(healthData);
-    }
-  }
-
-  private async testAPIKey(): Promise<boolean> {
-    try {
-      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
-        method: 'GET',
-        headers: {
-          'x-goog-api-key': GEMINI_API_KEY,
-        },
-      });
-
-      if (response.ok) {
-        return true;
-      } else {
-        const errorText = await response.text();
-        console.error('API key test failed:', errorText);
-        return false;
-      }
-    } catch (error) {
-      console.error('API key test error:', error);
-      return false;
     }
   }
 

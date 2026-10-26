@@ -1,7 +1,5 @@
+import { askClaude } from './ClaudeService';
 import { HealthData } from './HealthService';
-
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
 
 export interface SleepQualityResult {
   qualityScore: number; // 0-100
@@ -15,34 +13,11 @@ class SleepQualityService {
     try {
       const prompt = this.buildAnalysisPrompt(healthData);
       
-      const requestBody = {
-        systemInstruction: {
-          parts: [{ text: 'You are a sleep quality analysis expert. Analyze the provided health data and estimate sleep quality based on sleep duration, heart rate, and other relevant metrics. Provide a score from 0-100 and detailed explanation.' }]
-        },
-        contents: [
-          { role: 'user', parts: [{ text: prompt }] }
-        ],
-        generationConfig: {
-          maxOutputTokens: 500,
-          temperature: 0.3,
-        },
-      };
-
-      const response = await fetch(GEMINI_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': GEMINI_API_KEY,
-        },
-        body: JSON.stringify(requestBody),
+      const text = await askClaude({
+        system: 'You are a sleep quality analysis expert. Analyze the provided health data and estimate sleep quality based on sleep duration, heart rate, and other relevant metrics. Provide a score from 0-100 and detailed explanation.',
+        prompt,
       });
-
-      if (!response.ok) {
-        throw new Error(`Sleep quality analysis failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const analysis = this.parseSleepQualityResponse(data.candidates[0].content.parts[0].text);
+      const analysis = this.parseSleepQualityResponse(text);
       
       return analysis;
     } catch (error) {
