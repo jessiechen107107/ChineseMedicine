@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Dimensions, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
+import { authService } from '../services/AuthService';
 
 export default function SignUpScreen() {
   const insets = useSafeAreaInsets();
@@ -11,10 +12,20 @@ export default function SignUpScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
-    // Placeholder submit action
-    router.replace('(tabs)');
+  const handleSubmit = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await authService.signUp(name, email, password);
+      router.replace('/(tabs)');
+    } catch (e: any) {
+      setError(e?.message ?? 'Sign up failed.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -58,11 +69,12 @@ export default function SignUpScreen() {
           value={password}
           onChangeText={setPassword}
         />
+        {error && <Text style={styles.errorText}>{error}</Text>}
       </View>
 
       {/* Button */}
-      <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} activeOpacity={0.85}>
-        <Text style={styles.primaryButtonText}>SIGNUP</Text>
+      <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} activeOpacity={0.85} disabled={loading}>
+        {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>SIGNUP</Text>}
       </TouchableOpacity>
 
       {/* Footer */}
@@ -141,6 +153,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 1,
+  },
+  errorText: {
+    color: '#F2B8B5',
+    fontSize: 14,
+    marginTop: 12,
   },
   footerRow: {
     flexDirection: 'row',

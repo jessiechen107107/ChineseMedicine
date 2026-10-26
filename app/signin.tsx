@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Dimensions, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
+import { authService } from '../services/AuthService';
 
 export default function SignInScreen() {
   const insets = useSafeAreaInsets();
@@ -10,9 +11,24 @@ export default function SignInScreen() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    // Placeholder auth; on success route to app tabs
+  const handleLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await authService.signIn(email, password);
+      router.replace('/(tabs)');
+    } catch (e: any) {
+      setError(e?.message ?? 'Sign in failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDemo = async () => {
+    await authService.signInDemo();
     router.replace('/(tabs)');
   };
 
@@ -51,15 +67,20 @@ export default function SignInScreen() {
           onChangeText={setPassword}
         />
         <View style={styles.forgotRow}>
-          <TouchableOpacity onPress={() => { /* TODO: forgot flow */ }}>
+          <TouchableOpacity onPress={() => Alert.alert('Local account', 'Accounts are stored only on this device. Create a new account or use the demo account.')}>
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </TouchableOpacity>
         </View>
+        {error && <Text style={styles.errorText}>{error}</Text>}
       </View>
 
       {/* Button */}
-      <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} activeOpacity={0.85}>
-        <Text style={styles.primaryButtonText}>LOGIN</Text>
+      <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} activeOpacity={0.85} disabled={loading}>
+        {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>LOGIN</Text>}
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.demoButton} onPress={handleDemo} activeOpacity={0.85}>
+        <Text style={styles.demoButtonText}>Try Demo Account</Text>
       </TouchableOpacity>
 
       {/* Footer */}
@@ -147,6 +168,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 1,
+  },
+  errorText: {
+    color: '#F2B8B5',
+    fontSize: 14,
+    marginTop: 12,
+  },
+  demoButton: {
+    borderColor: '#7d968a',
+    borderWidth: 1,
+    borderRadius: 14,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  demoButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
   footerRow: {
     flexDirection: 'row',

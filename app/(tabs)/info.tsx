@@ -3,8 +3,10 @@ import { HeartChart } from '@/components/HeartChart';
 import { SleepQualityModal } from '@/components/SleepQualityModal';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { authService } from '@/services/AuthService';
 import { HealthData, healthService } from '@/services/HealthService';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Dimensions, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +33,21 @@ export default function InfoScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+
+  const handleLogout = () => {
+    Alert.alert('Log out', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        onPress: async () => {
+          await authService.signOut();
+          router.replace('/welcome');
+        },
+      },
+    ]);
+  };
 
   // Helper to format month and day
   const formatMonthDay = (date: Date) => {
@@ -195,6 +212,9 @@ export default function InfoScreen() {
                   <ThemedText style={styles.todayButton}>Today</ThemedText>
                 </TouchableOpacity>
               )}
+              <TouchableOpacity onPress={handleLogout} style={styles.logoutButton} accessibilityLabel="Log out">
+                <Ionicons name="log-out-outline" size={17} color={'#FFFFFF'} />
+              </TouchableOpacity>
             </View>
             </View>
 
@@ -591,6 +611,10 @@ const styles = StyleSheet.create({
   syncButton: {
     padding: 8,
     marginRight: 8,
+  },
+  logoutButton: {
+    padding: 8,
+    marginLeft: 4,
   },
   healthStatusBanner: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
+import { authService } from '../services/AuthService';
 import { Dimensions, Image, ImageBackground, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function WelcomeScreen() {
@@ -8,6 +9,11 @@ export default function WelcomeScreen() {
 
   const handleLogin = () => {
     router.push('/signin');
+  };
+
+  const handleDemo = async () => {
+    await authService.signInDemo();
+    router.replace('/(tabs)');
   };
 
   return (
@@ -35,12 +41,20 @@ export default function WelcomeScreen() {
           <Text style={styles.primaryButtonText}>Login With Email</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.demoButton} onPress={handleDemo} activeOpacity={0.8}>
+          <Text style={styles.primaryButtonText}>Try Demo</Text>
+        </TouchableOpacity>
+
         <View style={styles.footerRow}>
           <Text style={styles.footerText}>Don't have an account?</Text>
           <TouchableOpacity onPress={() => router.push('/signup')}>
             <Text style={styles.footerLink}> Sign Up</Text>
           </TouchableOpacity>
         </View>
+
+        <Text style={styles.disclaimer}>
+          Wellness suggestions inspired by Traditional Chinese Medicine. For reference only, not medical advice.
+        </Text>
       </View>
     </ImageBackground>
   );
@@ -98,6 +112,26 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  demoButton: {
+    borderColor: '#FFFFFF',
+    borderWidth: 1,
+    borderRadius: 14,
+    height: 48,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  disclaimer: {
+    position: 'absolute',
+    bottom: 40,
+    left: 24,
+    right: 24,
+    color: '#FFFFFF',
+    opacity: 0.75,
+    fontSize: 12,
+    textAlign: 'center',
   },
   footerRow: {
     flexDirection: 'row',
