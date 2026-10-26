@@ -47,7 +47,7 @@ export default function AnalysisScreen({ onAnalysisComplete, intake }: AnalysisS
       <View style={styles.circleContainer}>
         <View style={styles.circle}>
           <Image 
-            source={require('@/assets/images/ChatGPT Image 2025年8月8日 下午12_36_12.png')}
+            source={require('@/assets/images/tcm-card-bg.png')}
             style={styles.circleImage}
             resizeMode="cover"
           />

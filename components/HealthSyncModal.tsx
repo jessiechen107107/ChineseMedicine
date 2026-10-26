@@ -184,7 +184,7 @@ export function HealthSyncModal({ visible, onClose, onSyncComplete }: HealthSync
             <View style={styles.iconContainer}>
               <View style={styles.healthIcon}>
                 <Image 
-                  source={require('@/assets/images/Icon - Apple Health.png')} 
+                  source={require('@/assets/images/icon-apple-health.png')} 
                   style={styles.healthIconImage}
                   resizeMode="contain"
                 />

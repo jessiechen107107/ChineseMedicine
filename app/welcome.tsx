@@ -12,7 +12,7 @@ export default function WelcomeScreen() {
 
   return (
     <ImageBackground
-      source={require('../assets/images/ChatGPT Image 2025年7月1日 下午12_19_55.png')}
+      source={require('../assets/images/welcome-hero.png')}
       style={styles.bg}
       resizeMode="cover"
     >
@@ -23,7 +23,7 @@ export default function WelcomeScreen() {
 
       <View style={styles.content}>
         <Image
-          source={require('../assets/images/ChatGPT Image 2025年8月14日 下午02_19_42.png')}
+          source={require('../assets/images/logo.png')}
           style={styles.logo}
           resizeMode="contain"
         />

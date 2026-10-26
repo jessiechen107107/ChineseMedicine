@@ -21,7 +21,7 @@ export default function SignInScreen() {
       {/* Header */}
       <View style={styles.headerRow}>
         <Image
-          source={require('../assets/images/ChatGPT Image 2025年8月14日 下午02_19_42.png')}
+          source={require('../assets/images/logo.png')}
           style={styles.headerLogo}
           resizeMode="contain"
         />

@@ -191,7 +191,7 @@ export default function DiagnosisScreen() {
         {/* Main TCM Card */}
         <View style={styles.mainCard}>
           <ImageBackground
-            source={require('@/assets/images/ChatGPT Image 2025年8月8日 下午12_36_12.png')}
+            source={require('@/assets/images/tcm-card-bg.png')}
             style={styles.gradientCard}
             imageStyle={styles.backgroundImage}
           >
@@ -212,7 +212,7 @@ export default function DiagnosisScreen() {
           {/* Look (望) */}
           <View style={styles.sectionCard}>
             {sectionHeader(
-              require('@/assets/images/ChatGPT Image 2025年8月8日 下午01_03_41.png'),
+              require('@/assets/images/exam-look.png'),
               '#4ECDC4',
               'Look (望)',
               'Face and tongue photos. Take one or upload from your library.',
@@ -227,7 +227,7 @@ export default function DiagnosisScreen() {
           {/* Listen & Smell (聞) */}
           <View style={styles.sectionCard}>
             {sectionHeader(
-              require('@/assets/images/ChatGPT Image 2025年8月8日 下午01_12_29.png'),
+              require('@/assets/images/exam-listen.png'),
               '#45B7D1',
               'Listen & Smell (聞)',
               'Have you noticed any body odors lately?',
@@ -257,7 +257,7 @@ export default function DiagnosisScreen() {
           {/* Ask (問) */}
           <View style={styles.sectionCard}>
             {sectionHeader(
-              require('@/assets/images/ChatGPT Image 2025年8月8日 下午02_00_53.png'),
+              require('@/assets/images/exam-ask.png'),
               '#96CEB4',
               'Ask (問)',
               `Answer at least ${MIN_ANSWERS} questions (${answeredCount}/${INQUIRY_QUESTIONS.length}).`,
@@ -298,7 +298,7 @@ export default function DiagnosisScreen() {
           {/* Feel the pulse (切) */}
           <View style={styles.sectionCard}>
             {sectionHeader(
-              require('@/assets/images/ChatGPT Image 2025年8月8日 下午02_23_35.png'),
+              require('@/assets/images/exam-feel.png'),
               '#FFEAA7',
               'Feel (切)',
               'Estimate your pulse from Apple Watch heart rate and HRV.',
