@@ -136,7 +136,7 @@ export default function ResultsScreen({ onReturnToAssessment, analysisResult }: 
       {/* Footer disclaimer */}
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          {analysisResult.source === 'gemini'
+          {analysisResult.source === 'claude'
             ? 'These results are AI-generated from your answers, photos and health data.'
             : 'These results come from an on-device questionnaire analysis of your answers and health data.'}{' '}
           They are for reference only and do not constitute a medical diagnosis or advice.

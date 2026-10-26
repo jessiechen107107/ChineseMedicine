@@ -1,11 +1,9 @@
+import { askClaude, ClaudeImage, isClaudeConfigured, parseJsonReply } from './ClaudeService';
 import { HealthData } from './HealthService';
 
 // Four Examinations (望聞問切) intake: Look, Listen/Smell, Ask, Pulse.
-// Builds a constitution profile locally (works offline) and, when a Gemini key is set,
-// asks Gemini for a narrative reading that includes the face and tongue photos.
-
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+// Builds a constitution profile locally (works offline) and, when a Claude API key is set,
+// asks Claude for a narrative reading that includes the face and tongue photos.
 
 export type ConstitutionKey =
   | 'balanced'
@@ -165,7 +163,7 @@ export interface FourExamsResult {
   dietRecommendations: string[];
   lifestyleRecommendations: string[];
   acupressurePoints: string[];
-  source: 'gemini' | 'offline';
+  source: 'claude' | 'offline';
 }
 
 // Rough pulse-quality estimate from Apple Watch heart rate and HRV
@@ -303,7 +301,7 @@ function buildOfflineResult(intake: IntakeData, scores: FourExamsResult['scores'
     primary,
     pulse,
     observation: photos
-      ? `Your ${photos} photo${photos.includes('and') ? 's are' : ' is'} saved with this assessment. Add a Gemini API key to get an AI reading of complexion and tongue coating.`
+      ? `Your ${photos} photo${photos.includes('and') ? 's are' : ' is'} saved with this assessment. Add a Claude API key to get an AI reading of complexion and tongue coating.`
       : 'No photos were provided for observation.',
     pulseAnalysis: pulse ? `${pulse.label}: ${pulse.description}` : 'No heart data was available for the pulse estimate.',
     comprehensiveAnalysis:
@@ -311,7 +309,7 @@ function buildOfflineResult(intake: IntakeData, scores: FourExamsResult['scores'
       (smellLabels.length ? `You reported ${smellLabels.join(', ')}. ` : ''),
     correspondingSymptoms: p.summary,
     answerToQuestion: intake.question.trim()
-      ? 'Detailed answers to your question need the AI reading (set EXPO_PUBLIC_GEMINI_API_KEY). The suggestions below are matched to your constitution.'
+      ? 'Detailed answers to your question need the AI reading (set EXPO_PUBLIC_ANTHROPIC_API_KEY). The suggestions below are matched to your constitution.'
       : '',
     dietRecommendations: advice.diet,
     lifestyleRecommendations: advice.lifestyle,
@@ -320,19 +318,12 @@ function buildOfflineResult(intake: IntakeData, scores: FourExamsResult['scores'
   };
 }
 
-function extractJson(text: string): any {
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  return JSON.parse(cleaned.slice(start, end + 1));
-}
-
 export async function analyzeFourExams(intake: IntakeData): Promise<FourExamsResult> {
   const scores = scoreConstitution(intake);
   const pulse = estimatePulse(intake.healthData);
   const offline = buildOfflineResult(intake, scores, pulse);
 
-  if (!GEMINI_API_KEY) return offline;
+  if (!isClaudeConfigured()) return offline;
 
   const answers = INQUIRY_QUESTIONS.map((q) => {
     const option = q.options.find((o) => o.id === intake.answers[q.id]);
@@ -365,25 +356,18 @@ Describe what you see in the photos (complexion, tongue color, coating, shape) i
   "acupressurePoints": ["...", "...", "..."]
 }`;
 
-  const parts: any[] = [{ text: prompt }];
-  [intake.facePhoto, intake.tonguePhoto].forEach((photo) => {
-    if (photo?.base64) parts.push({ inline_data: { mime_type: 'image/jpeg', data: photo.base64 } });
-  });
+  const images: ClaudeImage[] = [intake.facePhoto, intake.tonguePhoto]
+    .filter((photo): photo is IntakePhoto => !!photo?.base64)
+    .map((photo) => ({ base64: photo.base64 as string }));
 
   try {
-    const response = await fetch(GEMINI_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: { maxOutputTokens: 1500, temperature: 0.6, responseMimeType: 'application/json' },
-      }),
+    const text = await askClaude({
+      system: 'You are a caring Traditional Chinese Medicine wellness advisor. You give wellness suggestions, never diagnoses or prescriptions.',
+      prompt,
+      images,
     });
-    if (!response.ok) throw new Error(`Gemini request failed: ${response.status}`);
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
-    const ai = extractJson(text);
-    return { ...offline, ...ai, scores, primary: offline.primary, pulse, source: 'gemini' };
+    const ai = parseJsonReply(text);
+    return { ...offline, ...ai, scores, primary: offline.primary, pulse, source: 'claude' };
   } catch (error) {
     console.error('Four Examinations AI analysis failed:', error);
     return offline;

@@ -2,7 +2,7 @@
 
 ## Chinese Medicine Health App | Personal Project
 
-**Technologies**: React Native, TypeScript, Expo, Google Gemini API, Apple HealthKit, iOS Native (Swift), AsyncStorage
+**Technologies**: React Native, TypeScript, Expo, Claude API (Anthropic), Apple HealthKit, iOS Native (Swift), AsyncStorage
 
 Developed a comprehensive mobile health application that integrates Traditional Chinese Medicine (TCM) principles with modern health monitoring technology. The app provides AI-powered wellness analysis by combining real-time health data, weather conditions, and user inputs to deliver personalized TCM-based health insights and recommendations.
 
@@ -11,7 +11,7 @@ Developed a comprehensive mobile health application that integrates Traditional 
 
 - **Health Data Integration**: Integrated Apple HealthKit (react-native-health) to synchronize and analyze real-time health metrics including heart rate, Heart Rate Variability (HRV), sleep duration/quality, blood oxygen levels, step count, exercise minutes, ECG readings, and menstrual cycle tracking. Implemented historical data aggregation and weekly trend visualizations with custom chart components
 
-- **AI-Powered Analysis Engine**: Implemented comprehensive TCM analysis using Google Gemini API with multiple analysis types:
+- **AI-Powered Analysis Engine**: Implemented comprehensive TCM analysis using Claude API (Anthropic) with multiple analysis types:
   - Constitution analysis (Qi deficiency, Blood deficiency, Yin/Yang imbalance, Damp-heat)
   - Organ function assessment (Heart, Liver, Spleen, Lung, Kidney) with 0-100 scoring system
   - External pathogen detection (Wind, Cold, Dampness, Dryness, Heat, Summer Heat)
@@ -38,6 +38,6 @@ Developed a comprehensive mobile health application that integrates Traditional 
 - Developed robust error handling with retry mechanisms (3 attempts) for API calls, timeout management (25s), and fallback analysis when APIs are unavailable
 - Managed sensitive permissions for health data (HealthKit), camera, and location access with proper user prompts and error handling
 - Created reusable component architecture with themed components (ThemedText, ThemedView) and specialized modules (AnalysisScreen, ResultsScreen, HeartChart, SleepQualityModal)
-- Integrated multiple external APIs (Google Gemini generateContent, Weather APIs) with proper authentication, request/response parsing, and error recovery
+- Integrated multiple external APIs (Claude Messages API, Weather APIs) with proper authentication, request/response parsing, and error recovery
 - Implemented data aggregation algorithms for historical health data analysis and trend calculation
 

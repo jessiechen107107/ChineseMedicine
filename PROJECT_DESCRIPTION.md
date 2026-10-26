@@ -9,7 +9,7 @@ A comprehensive mobile health application built with React Native and Expo that 
 - **Navigation**: Expo Router (file-based routing)
 - **State Management**: React Hooks
 - **Health Integration**: react-native-health (Apple HealthKit)
-- **AI Services**: Google Gemini API for health analysis
+- **AI Services**: Claude API (Anthropic) for health analysis
 - **Visualization**: react-native-chart-kit, react-native-svg
 - **Native Features**: Camera, Location, Image Picker, AsyncStorage
 - **Platform**: iOS (with native Swift integration), Android support
@@ -34,7 +34,7 @@ A comprehensive mobile health application built with React Native and Expo that 
 - Permission management and data privacy handling
 
 ### 3. **AI-Powered TCM Analysis**
-- Comprehensive health analysis using Google Gemini API
+- Comprehensive health analysis using Claude API (Anthropic)
 - Multiple analysis types:
   - **Constitution Analysis**: Identifies body constitution tendencies (Qi deficiency, Blood deficiency, Yin/Yang imbalance, Damp-heat, etc.)
   - **Organ Function Analysis**: Evaluates the health of five major organs (Heart, Liver, Spleen, Lung, Kidney)
@@ -85,7 +85,7 @@ A comprehensive mobile health application built with React Native and Expo that 
 
 ### Service Layer
 - **HealthService**: Manages Apple HealthKit integration and health data synchronization
-- **AIAnalysisService**: Handles Google Gemini API integration and TCM analysis logic
+- **AIAnalysisService**: Handles Claude API (Anthropic) integration and TCM analysis logic
 - **WeatherIntegrationService**: Manages weather data fetching and TCM weather analysis
 - **SleepQualityService**: Processes sleep data and generates quality metrics
 
@@ -125,7 +125,7 @@ A comprehensive mobile health application built with React Native and Expo that 
 - Implemented complex data visualization using SVG and chart libraries
 - Built scalable service architecture for modular functionality
 - Created responsive UI that adapts to different screen sizes
-- Integrated external APIs (Google Gemini, Weather) with proper error handling
+- Integrated external APIs (Claude API, Weather) with proper error handling
 - Implemented permission management for sensitive health data
 - Developed custom health analysis algorithms combining TCM principles with modern health metrics
 
