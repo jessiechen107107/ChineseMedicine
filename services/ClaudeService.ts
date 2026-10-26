@@ -1,26 +1,19 @@
-import Anthropic from '@anthropic-ai/sdk';
-
 // Shared Claude API client for all AI features.
 // Set EXPO_PUBLIC_ANTHROPIC_API_KEY in .env. Every caller keeps an offline fallback,
 // so the app still works without a key or network.
 //
 // Note: EXPO_PUBLIC_* values are bundled into the app, so the key ships with the build.
 // That is acceptable for a personal demo; a production app should call Claude from a backend.
+//
+// This calls the Messages API over fetch rather than @anthropic-ai/sdk: the SDK targets
+// Node/browser/Deno/Workers and fails to initialize under Hermes.
 
 const ANTHROPIC_API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
-const CLAUDE_MODEL = 'claude-opus-5-5';
+const CLAUDE_MODEL = 'claude-opus-5';
+const API_URL = 'https://api.anthropic.com/v1/messages';
+const TIMEOUT_MS = 60_000;
 
-const client = ANTHROPIC_API_KEY
-  ? new Anthropic({
-      apiKey: ANTHROPIC_API_KEY,
-      // React Native looks like a browser to the SDK; the key is already in the bundle (see note above)
-      dangerouslyAllowBrowser: true,
-      timeout: 60_000,
-      maxRetries: 2,
-    })
-  : null;
-
-export const isClaudeConfigured = () => client !== null;
+export const isClaudeConfigured = () => ANTHROPIC_API_KEY !== '';
 
 export interface ClaudeImage {
   base64: string;
@@ -33,37 +26,73 @@ interface AskOptions {
   images?: ClaudeImage[];
 }
 
+interface MessagesResponse {
+  content: { type: string; text?: string }[];
+  stop_reason: string;
+  stop_details?: { category?: string | null } | null;
+}
+
 // Sends one prompt and returns the reply text. Throws if no key is set or the request fails.
 export async function askClaude({ system, prompt, images = [] }: AskOptions): Promise<string> {
-  if (!client) throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY');
+  if (!ANTHROPIC_API_KEY) throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY');
 
-  const content: Anthropic.Beta.BetaContentBlockParam[] = [
+  const content = [
     ...images.map((image) => ({
       type: 'image' as const,
-      source: { type: 'base64' as const, media_type: image.mediaType ?? 'image/jpeg', data: image.base64 },
+      source: {
+        type: 'base64' as const,
+        media_type: image.mediaType ?? 'image/jpeg',
+        data: image.base64,
+      },
     })),
     { type: 'text' as const, text: prompt },
   ];
 
-  const response = await client.beta.messages.create({
+  const body = {
     model: CLAUDE_MODEL,
     max_tokens: 16000,
     system,
     // Low effort keeps replies fast enough for a mobile UI
     output_config: { effort: 'low' },
     // If a request is declined by safety classifiers, the API retries it on a fallback model
-    betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
     messages: [{ role: 'user', content }],
-  });
+  };
 
-  if (response.stop_reason === 'refusal') {
-    throw new Error(`Claude declined the request (${response.stop_details?.category ?? 'unknown'})`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'server-side-fallback-2026-07-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
   }
 
-  return response.content
-    .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === 'text')
-    .map((block) => block.text)
+  if (!response.ok) {
+    throw new Error(`Claude API ${response.status}: ${await response.text()}`);
+  }
+
+  const data: MessagesResponse = await response.json();
+
+  if (data.stop_reason === 'refusal') {
+    throw new Error(`Claude declined the request (${data.stop_details?.category ?? 'unknown'})`);
+  }
+
+  return data.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
     .join('');
 }
 
