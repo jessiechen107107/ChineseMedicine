@@ -1,6 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
-import AppleHealthKit, { HealthKitPermissions, HealthValue } from 'react-native-health';
+import { NativeModules, Platform } from 'react-native';
+import RNHealth, { HealthKitPermissions, HealthValue } from 'react-native-health';
+
+// react-native-health re-exports the native module through Object.assign, which copies only own
+// enumerable properties. Under the New Architecture the interop object carries its methods on the
+// prototype, so that copy arrives with no methods at all and every call throws "is not a function".
+// Call the native module directly and take only the constants from the JS wrapper.
+const HealthKit: any = NativeModules.AppleHealthKit;
+const HealthConstants = RNHealth.Constants;
 
 export interface HealthData {
   steps: number;
@@ -72,19 +79,19 @@ class HealthService {
         const permissions: HealthKitPermissions = {
           permissions: {
             read: [
-              AppleHealthKit.Constants.Permissions.HeartRate,
-              AppleHealthKit.Constants.Permissions.HeartRateVariability,
-              AppleHealthKit.Constants.Permissions.Steps,
-              AppleHealthKit.Constants.Permissions.SleepAnalysis,
-              AppleHealthKit.Constants.Permissions.OxygenSaturation,
-              AppleHealthKit.Constants.Permissions.RestingHeartRate,
+              HealthConstants.Permissions.HeartRate,
+              HealthConstants.Permissions.HeartRateVariability,
+              HealthConstants.Permissions.Steps,
+              HealthConstants.Permissions.SleepAnalysis,
+              HealthConstants.Permissions.OxygenSaturation,
+              HealthConstants.Permissions.RestingHeartRate,
             ],
             write: [],
           },
         } as HealthKitPermissions;
 
         await new Promise<void>((resolve, reject) => {
-          AppleHealthKit.initHealthKit(permissions, (error: string) => {
+          HealthKit.initHealthKit(permissions, (error: string) => {
             if (error) {
               console.warn('[HealthKit] init error:', error);
               reject(new Error(error));
@@ -152,7 +159,7 @@ class HealthService {
     const toISO = (d: Date) => d.toISOString();
 
     const hrSamples: HealthValue[] = await new Promise((resolve) => {
-      AppleHealthKit.getHeartRateSamples({ startDate: toISO(startDate), endDate: toISO(endDate), ascending: false, limit: 1000 }, (err: string, results: HealthValue[]) => {
+      HealthKit.getHeartRateSamples({ startDate: toISO(startDate), endDate: toISO(endDate), ascending: false, limit: 1000 }, (err: string, results: HealthValue[]) => {
         if (err) {
           console.warn('[HealthKit] getHeartRateSamples error:', err);
           resolve([]);
@@ -163,7 +170,7 @@ class HealthService {
     });
 
     const hrvSamples: HealthValue[] = await new Promise((resolve) => {
-      AppleHealthKit.getHeartRateVariabilitySamples({ startDate: toISO(startDate), endDate: toISO(endDate), ascending: false, limit: 1000 }, (err: string, results: HealthValue[]) => {
+      HealthKit.getHeartRateVariabilitySamples({ startDate: toISO(startDate), endDate: toISO(endDate), ascending: false, limit: 1000 }, (err: string, results: HealthValue[]) => {
         if (err) {
           console.warn('[HealthKit] getHeartRateVariabilitySamples error:', err);
           resolve([]);
@@ -245,11 +252,14 @@ class HealthService {
   }
 
   // Promise wrapper for the HealthKit callback API
-  private hkCall<T>(fn: (options: any, cb: (err: string, results: T) => void) => void, options: any): Promise<T | null> {
+  // Takes the method name rather than the function so the call keeps its `this`: under the New
+  // Architecture these methods live on the interop object's prototype and throw when detached.
+  private hkCall<T>(method: string, options: any): Promise<T | null> {
     return new Promise((resolve) => {
       try {
-        fn(options, (err, results) => resolve(err ? null : results));
-      } catch {
+        HealthKit[method](options, (err: string, results: T) => resolve(err ? null : results));
+      } catch (error) {
+        console.warn(`[HealthKit] ${method} failed:`, error);
         resolve(null);
       }
     });
@@ -269,15 +279,14 @@ class HealthService {
     const sleepEnd = new Date(start.getTime() + 12 * 3600000);
 
     const avg = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
-    const HK = AppleHealthKit as any;
 
     const [steps, hr, hrv, rhr, spo2, sleep] = await Promise.all([
-      this.hkCall<HealthValue>(HK.getStepCount, { date: start.toISOString(), includeManuallyAdded: true }),
-      this.hkCall<HealthValue[]>(HK.getHeartRateSamples, { ...range, limit: 1000 }),
-      this.hkCall<HealthValue[]>(HK.getHeartRateVariabilitySamples, { ...range, limit: 1000 }),
-      this.hkCall<HealthValue[]>(HK.getRestingHeartRateSamples, { ...range, limit: 10 }),
-      this.hkCall<HealthValue[]>(HK.getOxygenSaturationSamples, { ...range, limit: 1000 }),
-      this.hkCall<any[]>(HK.getSleepSamples, { startDate: sleepStart.toISOString(), endDate: sleepEnd.toISOString(), limit: 1000 }),
+      this.hkCall<HealthValue>('getStepCount', { date: start.toISOString(), includeManuallyAdded: true }),
+      this.hkCall<HealthValue[]>('getHeartRateSamples', { ...range, limit: 1000 }),
+      this.hkCall<HealthValue[]>('getHeartRateVariabilitySamples', { ...range, limit: 1000 }),
+      this.hkCall<HealthValue[]>('getRestingHeartRateSamples', { ...range, limit: 10 }),
+      this.hkCall<HealthValue[]>('getOxygenSaturationSamples', { ...range, limit: 1000 }),
+      this.hkCall<any[]>('getSleepSamples', { startDate: sleepStart.toISOString(), endDate: sleepEnd.toISOString(), limit: 1000 }),
     ]);
 
     const result: Partial<HealthData> = {};

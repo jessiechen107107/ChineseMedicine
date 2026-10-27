@@ -65,6 +65,13 @@
           "locationAlwaysAndWhenInUsePermission": "This app needs location access to provide personalized health insights."
         }
       ],
+      [
+        "react-native-health",
+        {
+          "healthSharePermission": "This app reads your heart rate, HRV, sleep and activity to build your TCM constitution profile.",
+          "healthUpdatePermission": "This app may write limited wellness data to Apple Health."
+        }
+      ],
       "expo-web-browser"
     ],
     "experiments": {
