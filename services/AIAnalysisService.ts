@@ -158,7 +158,6 @@ export class AIAnalysisService {
 
       const prompt = this.buildPersonalizedAdvicePrompt(healthData, assessmentData, location);
 
-      // The SDK already retries rate limits, 5xx errors and network failures
       const text = await askClaude({
         system: 'You are a Traditional Chinese Medicine (TCM) wellness expert specializing in personalized lifestyle advice. Analyze health data, assessment records, and environmental factors to provide specific recommendations for diet, sleep, emotions, exercise, and acupressure therapy.',
         prompt,

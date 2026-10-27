@@ -11,7 +11,9 @@
 const ANTHROPIC_API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
 const CLAUDE_MODEL = 'claude-opus-5';
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const TIMEOUT_MS = 60_000;
+// The comprehensive analysis asks for several thousand tokens of JSON and measures around 110s.
+// React Native's fetch cannot stream, so the whole response has to arrive within one request.
+const TIMEOUT_MS = 180_000;
 
 export const isClaudeConfigured = () => ANTHROPIC_API_KEY !== '';
 
